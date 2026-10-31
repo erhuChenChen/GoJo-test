@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#15171c" />
+  <title>GoJo</title>
+  <link rel="stylesheet" href="css/base.css?v=20261101f" />
+  <link rel="stylesheet" href="css/themes.css?v=20261101f" />
+  <link rel="stylesheet" href="css/components.css?v=20261101f" />
+</head>
+<body>
+  <div id="app">
+    <!-- 应用主框架由 app.js 渲染 -->
+    <div id="boot" class="boot">
+      <div class="boot-logo">GoJo</div>
+      <div class="boot-sub">正在加载…</div>
+    </div>
+  </div>
+
+  <!-- 弹窗 / 提示 根节点 -->
+  <div id="modal-root"></div>
+  <div id="toast-root"></div>
+
+  <!-- 本地内置 JSZip（离线可用，不依赖 CDN） -->
+  <script src="js/vendor/jszip.min.js?v=20261101f"></script>
+  <!-- 业务脚本：经典 script 顺序加载，挂在 window.App 命名空间 -->
+  <script src="js/storage.js?v=20261101f"></script>
+  <script src="js/db.js?v=20261101f"></script>
+  <script src="js/state.js?v=20261101f"></script>
+  <script src="js/domains.js?v=20261101f"></script>
+  <script src="js/themes.js?v=20261101f"></script>
+  <script src="js/ui.js?v=20261101f"></script>
+  <script src="js/setup.js?v=20261101f"></script>
+  <script src="js/dashboard.js?v=20261101f"></script>
+  <script src="js/records.js?v=20261101f"></script>
+  <script src="js/settings.js?v=20261101f"></script>
+  <script src="js/exim.js?v=20261101f"></script>
+  <script src="js/app.js?v=20261101f"></script>
+</body>
+</html>

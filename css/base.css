@@ -1,0 +1,204 @@
+/* ===== base.css — reset / 变量默认值(深色) / 布局 ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* 深色极简（默认） */
+  --bg: #15171c;
+  --bg-2: #1b1e25;
+  --surface: rgba(255,255,255,0.07);
+  --surface-2: rgba(255,255,255,0.11);
+  --card-bg: rgba(255,255,255,0.075); /* 卡片毛玻璃底色（半透明，叠 blur 使用） */
+  --text: #eef0f4;
+  --text-dim: #98a0ad;
+  --accent: #8b9cff;
+  /* 强调色作底时，叠在上面的文字/图标颜色（深底白字、浅底黑字，由 JS 按亮度算） */
+  --on-accent: #ffffff;
+  --accent-soft: rgba(139,156,255,0.16);
+  --border: rgba(255,255,255,0.10);
+  --glass: rgba(255,255,255,0.06);
+  /* 页面背景的半透明版本：顶栏/底栏用它做底色，
+     叠上 backdrop-filter 后视觉上等于页面背景，看不出「切三块」，又能挡住滚到栏下的内容 */
+  --bg-alpha: rgba(21,23,28,0.88);
+  --shadow: 0 1px 3px rgba(72,81,132,0.30), 0 12px 30px rgba(72,81,132,0.38);
+  --danger: #ff6b6b;
+  --ok: #4ec98a;
+  --radius: 20px;
+  --radius-sm: 13px;
+  --radius-pill: 999px;
+  --gap: 14px;
+  --header-h: 42px;
+  --nav-h: 48px;
+  --maxw: 980px;
+  --page-pad: 16px; /* 全局页面左右统一内边距（保证左右对称） */
+  --sc-thumb: rgba(140,152,172,0.5); /* 横向滚动条滑块：中性灰，深浅主题下都清晰可见 */
+  --font-scale: 1; /* 全局字号缩放因子，由 JS 按档位设置（小0.875/标准1/大1.15/超大1.3） */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+}
+
+html, body { height: 100%; }
+/* 移动端：禁止浏览器在横竖屏/缩放时自动放大字体；基础字号用 rem（1rem=16px） */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; font-size: calc(var(--font-scale, 1) * 16px); }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.55;
+  font-size: 1rem;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* 重要：body 绝不加 overflow:hidden / overflow-x:clip 这类会裁剪或抑制
+     后代滚动容器的属性，否则设置页导航 / 记录页分类栏等横向滑动会被压死。
+     滚动条统一用下方 scrollbar-width:none + ::-webkit-scrollbar{display:none}
+     隐藏——这种方式只隐藏视觉滚动条，绝不禁用滑动。 */
+  transition: background .35s ease, color .35s ease;
+}
+
+button, input, textarea, select { font-family: inherit; color: inherit; }
+button { cursor: pointer; border: none; background: none; }
+a { color: var(--accent); text-decoration: none; }
+img { display: block; max-width: 100%; }
+
+/* 全局隐藏滚动条（仅隐藏视觉滚动条；鼠标滚轮 / 触摸滑动 / 键盘方向键滚动均不受影响） */
+html, body { scrollbar-width: none; -ms-overflow-style: none; }
+::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+/* 环境光：页面背后铺一层极淡的主题色光晕。
+   作用不是装饰 —— 卡片用的是半透明底 + backdrop-filter，
+   如果背景是一块纯色，磨砂玻璃“磨”到的还是同一个颜色，肉眼就看不出通透感。
+   有了这层随主题变色的光晕，不同位置的卡片才会透出深浅不一的底色。
+
+   定位要点（本轮调整）：
+   ① 用一个正方形图层，边长取 130vmax，靠 left/top 50% + translate(-50%,-50%)
+      把自己钉在**视口正中**，任何屏幕尺寸/横竖屏都居中，不再用百分比锚点（会随屏宽跑偏）；
+   ② position: fixed —— 页面滚动时光晕钉在背景层不动，只有内容在它上面滑；
+   ③ 只用 radial-gradient 做柔和衰减，不加 filter: blur（大图层上的模糊在移动端很费 GPU）。 */
+body::before {
+  content: ''; position: fixed; z-index: 0; pointer-events: none;
+  left: 50%; top: 50%;
+  /* 用 vmin（屏幕短边）定尺寸：宽高恒等 → 永远是正圆；100vmin 只是短边长度，
+     不会像 vmax 那样在中低端 WebView 上被算成几倍屏、铺满整屏。
+     再用 max-width/height 兜住平板与大屏，避免光斑过大。 */
+  width: 100vmin; height: 100vmin;
+  max-width: 720px; max-height: 720px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  /* 整体再压一层不透明度：主题色本身是 0.18~0.22 的 alpha，乘 0.3 后约 0.05~0.07，
+     只留一点点若隐若现的色晕，不刺眼；自定义主题的光晕也会一起变淡。 */
+  opacity: 0.3;
+  background:
+    radial-gradient(circle at 50% 50%, var(--amb-1, transparent) 0%, var(--amb-2, transparent) 34%, transparent 68%);
+}
+#app { position: relative; z-index: 1; }
+
+/* ===== 应用主框架 ===== */
+/* 根容器锁宽：width:100% + box-sizing:border-box，杜绝内容把根撑宽导致右侧溢出 */
+#app {
+  min-height: 100%; width: 100%; max-width: 100%; box-sizing: border-box;
+  /* 主 Tab 跟手翻页会把 #view 横向平移：在根容器裁掉横向溢出，
+     避免文档被撑宽、触发页面「自适应缩放」闪变。
+     overflow-x: clip 不创建滚动容器，内部横向滑动组件与 sticky 顶栏均不受影响；
+     底部导航是 fixed（包含块是视口），也不会被它裁掉。 */
+  overflow-x: clip;
+}
+.app-shell { width: 100%; max-width: var(--maxw); margin: 0 auto; padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px)); box-sizing: border-box; }
+
+/* 全局根容器：统一左右内边距，确保左右完全对称。
+   用 max() 同时吸收 safe-area 左右安全区，保证即便设备左右内凹不一致，
+   左右留白也始终相等；box-sizing: border-box 让 padding 计入宽度，不撑破布局。
+   顶栏/底栏背景设为透明（只留磨砂），和页面背景完全融成一片，去掉分割线。 */
+.app-header {
+  position: sticky; top: 0; z-index: 30;
+  /* 用 min-height 而不是写死 height：刘海机 safe-area 很大时，
+     固定 height 会把内容区挤成 0，品牌名直接被压扁 */
+  min-height: var(--header-h);
+  display: flex; align-items: center; gap: 10px;
+  box-sizing: border-box;
+  padding-top: max(env(safe-area-inset-top, 0px), 0px);
+  padding-bottom: 2px;
+  padding-left: max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right));
+  padding-right: max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right));
+  /* 底色 = 页面背景色（半透明版）+ 磨砂：和主页面严丝合缝，看不出分界线，
+     同时保证有内容滑到栏下时文字依然可读 */
+  background: var(--bg-alpha, transparent);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border-bottom: none;
+}
+.app-header .brand { font-weight: 800; font-size: calc(var(--font-scale, 1) * 15.5px); letter-spacing: .3px; }
+.app-header .spacer { flex: 1; }
+
+.view {
+  box-sizing: border-box;
+  width: 100%;
+  padding-top: 10px;
+  padding-bottom: 8px;
+  padding-left: max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right));
+  padding-right: max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right));
+  min-height: calc(100vh - var(--header-h) - var(--nav-h));
+  /* 安全网：页面级横向滚动一律禁止（clip 不产生滚动容器，不影响内部横向滑动组件） */
+  overflow-x: clip;
+}
+
+/* 关键修复：把「横向裁剪边界」收进内容区。
+   .view 的 overflow-x: clip 是裁在「padding 盒」上的，一旦某个子元素超宽，
+   它会一路画到屏幕最右边，把 16px 的右侧留白整块吃掉 —— 这就是
+   「左边有留白、右边贴死」的真正成因（实测：注入 900px 宽元素后，左留白
+   仍是 16px，右留白变 0）。
+   现在让每个页面根节点自己裁 + 锁宽，裁剪线就落在内容区右边界，
+   无论里面出现多宽的内容，左右留白都恒等。 */
+.view > * {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+/* 例外：卡片网格 / 设置页内容容器必须让卡片阴影横向溢出到页面留白里。
+   overflow-x: clip 的裁剪线落在「内容区边界」，卡片的 box-shadow 是画在盒子外侧的，
+   于是左右两列的阴影会被裁成一条直边（仪表盘 / 列表页 / 设置页实测）。
+   页面级兜底仍由 .view 的 overflow-x: clip 承担，所以不会产生横向滚动条。 */
+.view > .gallery,
+.view > .dash-grid,
+.view > .settings-body,
+.view > .detail-page { overflow-x: visible; }
+
+/* 底部导航：底色与页面背景完全一致 + 磨砂，无分割线 */
+.bottom-nav {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+  height: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px));
+  display: flex; justify-content: center;
+  background: var(--bg-alpha, transparent);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border-top: none;
+}
+.bottom-nav .nav-inner {
+  width: 100%; max-width: var(--maxw);
+  display: flex; align-items: stretch;
+}
+.nav-item {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 0; color: var(--text-dim); font-size: calc(var(--font-scale, 1) * 9.5px); font-weight: 600;
+  padding: 0 0 env(safe-area-inset-bottom, 0px);
+  transition: color .2s;
+}
+.nav-item svg { width: 18px; height: 18px; }
+.nav-item.active { color: var(--accent); }
+.nav-item.active svg { filter: drop-shadow(0 0 8px var(--accent-soft)); }
+
+/* 启动屏 */
+.boot { height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+.boot-logo { font-size: calc(var(--font-scale, 1) * 26px); font-weight: 800; letter-spacing: 2px; }
+.boot-sub { color: var(--text-dim); font-size: calc(var(--font-scale, 1) * 13px); }
+
+/* 通用布局工具 */
+.row { display: flex; align-items: center; gap: 10px; }
+.col { display: flex; flex-direction: column; gap: 10px; }
+.wrap { flex-wrap: wrap; }
+.muted { color: var(--text-dim); }
+.center { text-align: center; }
+.hidden { display: none !important; }
+.section-title { font-size: calc(var(--font-scale, 1) * 13px); font-weight: 700; color: var(--text-dim); letter-spacing: .6px; text-transform: uppercase; margin: 6px 2px; }
+.empty-state { text-align: center; color: var(--text-dim); padding: 48px 20px; }
+.empty-state .es-icon { font-size: calc(var(--font-scale, 1) * 40px); opacity: .5; margin-bottom: 10px; }
