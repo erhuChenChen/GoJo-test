@@ -2,16 +2,152 @@
 window.App = window.App || {};
 App.app = (function () {
   const U = () => App.ui;
-  let appEl, view, headerDomainBtn, navItems, systemBound = false;
+  let appEl, view, headerDomainBtn, navItems, systemBound = false, systemPlusBound = false, systemVisibilityBound = false;
+  let systemTimer = null, lastSystemDark = null;
+
+  // ===== 跟随系统 =====
+  // 系统深浅变了 → 只有外观模式为「跟随系统」时才重新解析并落地主题。
+  function applySystemThemeIfAuto() {
+    // 存储尚未就绪（首次启动、db 异常）时直接跳过，避免轮询把异常抛到控制台
+    const s = (App.state && App.state.data && App.state.data.settings) || null;
+    if (!s) return false;
+    if ((s.appearance || 'auto') !== 'auto') return false;
+    App.themes.applyFromSettings(s);
+    syncStatusBar();
+    return true;
+  }
 
   function bindSystemTheme() {
-    if (systemBound) return; systemBound = true;
+    if (systemBound) return;
+    systemBound = true;
+    lastSystemDark = App.themes.systemIsDark();
+
+    // 统一的一次「复查」：系统深浅变了才重新落地主题，没变立刻返回（轮询/事件共用）
+    function checkNow(force) {
+      const now = App.themes.systemIsDark();
+      if (!force && now === lastSystemDark) return;
+      lastSystemDark = now;
+      applySystemThemeIfAuto();
+    }
+
+    // ① 标准做法：媒体查询 change 事件（桌面浏览器、较新的 WebView 都会派发）
     try {
       const mq = window.matchMedia('(prefers-color-scheme: dark)');
-      const onChange = () => { if ((App.state.data.settings.appearance || 'auto') === 'auto') App.themes.applyFromSettings(App.state.data.settings); };
-      if (mq.addEventListener) mq.addEventListener('change', onChange); else if (mq.addListener) mq.addListener(onChange);
+      const onChange = () => { checkNow(false); };
+      if (mq.addEventListener) mq.addEventListener('change', onChange);
+      else if (mq.addListener) mq.addListener(onChange);
     } catch (e) {}
+    // ② 兜底轮询：安卓 WebView 在系统切深浅色时经常既不更新取值也不派发 change，
+    //    只靠事件会出现「选了跟随系统却纹丝不动」。每 0.8s 复查一次，没变化就立刻返回。
+    if (systemTimer) clearInterval(systemTimer);
+    systemTimer = setInterval(() => checkNow(false), 800);
+    // ③ 回到前台立即复查：用户在系统设置里切完深浅色、直接切回 App 时，
+    //    不必再等下一个轮询周期，观感上就是「立刻跟着变」。
+    if (!systemVisibilityBound) {
+      systemVisibilityBound = true;
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') checkNow(false);
+      }, false);
+      // 5+ 从后台恢复（真机上页面可能并未触发 visibilitychange）
+      document.addEventListener('resume', () => { checkNow(false); syncStatusBar(); }, false);
+    }
+    // ④ 5+ 环境：plus 注入后才能拿到 getUIStyle / 设置状态栏，plusready 时校准一次
+    if (!systemPlusBound) {
+      systemPlusBound = true;
+      const onPlus = () => {
+        checkNow(true);          // 强制校准：注入前用媒体查询算出的值可能不准
+        syncStatusBar();
+      };
+      if (window.plus) onPlus();
+      else document.addEventListener('plusready', onPlus, false);
+    }
   }
+
+  // ===== 原生状态栏配色（直接改色，非沉浸式透明）=====
+  // 要求：状态栏底色 = 顶部标题栏（GoJo 那栏）的底色，文字按深浅自动转黑/白。
+  // 顶栏用的是 --bg-alpha（页面底色的半透明版）配磨砂，而状态栏必须是实色，
+  // 所以把「顶栏色 × alpha」叠到「页面底色」上合成出等价的不透明色。
+  function cssColorToRgba(str) {
+    const s = String(str || '').trim();
+    if (!s) return null;
+    const m = s.match(/^rgba?\(([^)]+)\)$/i);
+    if (m) {
+      const p = m[1].split(/[,/\s]+/).filter(Boolean).map(Number);
+      if (p.length >= 3 && !p.slice(0, 3).some(isNaN)) {
+        return { r: p[0], g: p[1], b: p[2], a: p.length > 3 && !isNaN(p[3]) ? p[3] : 1 };
+      }
+      return null;
+    }
+    if (s.charAt(0) === '#') {
+      const c = s.slice(1);
+      const h = c.length === 3 ? c.charAt(0) + c.charAt(0) + c.charAt(1) + c.charAt(1) + c.charAt(2) + c.charAt(2) : c.slice(0, 6);
+      if (h.length === 6) {
+        const r = parseInt(h.substr(0, 2), 16), g = parseInt(h.substr(2, 2), 16), b = parseInt(h.substr(4, 2), 16);
+        if (![r, g, b].some(isNaN)) return { r: r, g: g, b: b, a: 1 };
+      }
+    }
+    return null;
+  }
+  function topbarSolidColor() {
+    let base = { r: 21, g: 23, b: 28, a: 1 };
+    let layer = null;
+    try {
+      const cs = getComputedStyle(document.documentElement);
+      base = cssColorToRgba(cs.getPropertyValue('--bg')) || base;
+      const header = document.querySelector('.app-header');
+      if (header) layer = cssColorToRgba(getComputedStyle(header).backgroundColor);
+      if (!layer) layer = cssColorToRgba(cs.getPropertyValue('--bg-alpha'));
+    } catch (e) {}
+    if (!layer) return base;
+    const a = Math.max(0, Math.min(1, layer.a));
+    return {
+      r: layer.r * a + base.r * (1 - a),
+      g: layer.g * a + base.g * (1 - a),
+      b: layer.b * a + base.b * (1 - a),
+      a: 1,
+    };
+  }
+  function hex2(v) { const n = Math.max(0, Math.min(255, Math.round(v))); return (n < 16 ? '0' : '') + n.toString(16); }
+
+  // plus 是异步注入的：boot 时通常还没就绪，早期一次 setStatusBarBackground 会被
+  // 直接跳过 —— 真机表现就是「启动后状态栏还是系统原色，要等切一次主题才对」。
+  // 这里把最近一次要下发的颜色暂存，plusready 后补发，保证首帧也对齐。
+  let pendingBar = null;
+
+  function pushStatusBar(hex, style) {
+    const plus = window.plus;
+    if (!plus || !plus.navigator) { pendingBar = { hex: hex, style: style }; return false; }
+    pendingBar = null;
+    // 先铺底色，再定文字明暗（部分机型顺序反过来会让文字色被系统覆盖）
+    try { if (typeof plus.navigator.setStatusBarBackground === 'function') plus.navigator.setStatusBarBackground(hex); } catch (e) {}
+    try { if (typeof plus.navigator.setStatusBarStyle === 'function') plus.navigator.setStatusBarStyle(style); } catch (e) {}
+    // 个别安卓机型首次调用不生效（拿不到 Activity 装饰视图），隔一帧再补一次
+    setTimeout(() => {
+      try { if (typeof plus.navigator.setStatusBarBackground === 'function') plus.navigator.setStatusBarBackground(hex); } catch (e) {}
+      try { if (typeof plus.navigator.setStatusBarStyle === 'function') plus.navigator.setStatusBarStyle(style); } catch (e) {}
+    }, 80);
+    return true;
+  }
+
+  function syncStatusBar() {
+    let solid;
+    try { solid = topbarSolidColor(); } catch (e) { return; }
+    const hex = '#' + hex2(solid.r) + hex2(solid.g) + hex2(solid.b);
+    // 部分壳子（含浏览器地址栏）用 theme-color 决定状态栏/工具栏颜色，一并同步
+    try {
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute('content', hex);
+    } catch (e) {}
+    // 亮度决定文字色：浅底用 dark（深色字），深底用 light（浅色字）
+    const lum = (0.299 * solid.r + 0.587 * solid.g + 0.114 * solid.b) / 255;
+    pushStatusBar(hex, lum < 0.55 ? 'light' : 'dark');
+  }
+
+  // plusready 补发：注册一次即可，早于 plus 注入的所有配色请求都会在这里落地
+  document.addEventListener('plusready', () => {
+    if (pendingBar) pushStatusBar(pendingBar.hex, pendingBar.style);
+    else syncStatusBar();
+  }, false);
 
   function applyFontScale() {
     const map = { small: 0.875, standard: 1, large: 1.15, xlarge: 1.3 };
@@ -28,13 +164,16 @@ App.app = (function () {
     const s = App.state.data.settings;
     App.themes.applyFromSettings(s);
     applyFontScale();
+    syncStatusBar();
+    // 引导页也要跟随系统切深浅色，所以在分支之前先绑好监听
+    bindSystemTheme();
     U().clear(appEl);
     if (!App.state.data.setupDone) { App.setup.render(appEl); return; }
     renderShell();
+    syncStatusBar();   // 顶栏此时才存在，重新取它的真实底色对齐状态栏
     renderRoute();
     initBackKey();
     initSwipe();
-    bindSystemTheme();
   }
 
   function navItem(key, label, iconName) {
@@ -163,7 +302,7 @@ App.app = (function () {
     let touchActive = false; // 本次触摸是否真的启动了手势
 
     function overlayOpen() {
-      return !!document.querySelector('#modal-root .modal-backdrop, #modal-root .modal, .iv-mask, .color-pop, .cf-sel-menu, .dots-menu, .popmenu, .emoji-picker');
+      return !!document.querySelector('#modal-root .modal-backdrop, #modal-root .modal, #modal-root .page-sheet, .iv-mask, .color-pop, .cf-sel-menu, .dots-menu, .popmenu, .emoji-picker');
     }
     function ignoreTarget(t) {
       if (!t || !t.closest) return true;
@@ -365,7 +504,7 @@ App.app = (function () {
   }
 
   window.addEventListener('hashchange', renderRoute);
-  return { boot, go, renderRoute, refreshChrome, applyFontScale, onBack, get view() { return view; } };
+  return { boot, go, renderRoute, refreshChrome, applyFontScale, syncStatusBar, onBack, get view() { return view; } };
 })();
 
 // 启动

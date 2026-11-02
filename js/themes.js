@@ -91,6 +91,22 @@ App.themes = (function () {
 
   function presetOf(key) { return PRESETS.find((p) => p.key === key) || null; }
 
+  // 「系统当前是不是深色」的唯一判据。
+  // 真机要点：安卓 WebView 里的 prefers-color-scheme 并不可靠 —— 系统切深浅色时
+  // 它经常既不更新取值、也不派发 change 事件（取决于 WebView 版本与 force-dark 配置）。
+  // 所以 5+ 环境优先问原生 plus.navigator.getUIStyle()，拿不到才回退媒体查询。
+  function systemIsDark() {
+    try {
+      const plus = window.plus;
+      if (plus && plus.navigator && typeof plus.navigator.getUIStyle === 'function') {
+        const u = plus.navigator.getUIStyle();
+        if (u === 'dark') return true;
+        if (u === 'light') return false;
+      }
+    } catch (e) {}
+    try { return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches); } catch (e) { return false; }
+  }
+
   let liveVars = [];
   function clearVars(root) {
     liveVars.forEach((k) => root.style.removeProperty(k));
@@ -123,6 +139,7 @@ App.themes = (function () {
     if (bg) {
       setVars(root, palette(bg, accent || (p && p.accent) || '#8b9cff'));
       nudgeRepaint();
+      notifyApplied();
       return;
     }
     clearVars(root);
@@ -133,6 +150,15 @@ App.themes = (function () {
       root.style.setProperty('--on-accent', onColor(p.accent));
       liveVars = ['--shadow', '--on-accent'];
     }
+    notifyApplied();
+  }
+
+  // 主题落地后的统一通知：原生状态栏要跟着顶栏换色。
+  // 不直接依赖 app.js 的加载顺序（themes.js 先加载，boot 前 App.app 可能还不存在）。
+  function notifyApplied() {
+    try {
+      if (window.App && App.app && typeof App.app.syncStatusBar === 'function') App.app.syncStatusBar();
+    } catch (e) {}
   }
 
   // 解析最终生效主题：日间/夜间/跟随系统 → 预设 / 我的主题 / 自定义 / 被改色的预设
@@ -143,7 +169,7 @@ App.themes = (function () {
     if (ap === 'day') key = s.dayTheme || 'light';
     else if (ap === 'night') key = s.nightTheme || 'dark';
     else {
-      const dark = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      const dark = systemIsDark();
       key = dark ? (s.nightTheme || 'dark') : (s.dayTheme || 'light');
     }
     if (key === 'custom') return { theme: 'custom', bg: s.customBg, accent: s.customAccent };
@@ -172,5 +198,5 @@ App.themes = (function () {
     return list;
   }
 
-  return { PRESETS, apply, toSoft, palette, shadowFor, textOn, onColor, relLum, luminance, resolveEffective, applyFromSettings, themeOptions };
+  return { PRESETS, apply, toSoft, palette, shadowFor, textOn, onColor, relLum, luminance, systemIsDark, resolveEffective, applyFromSettings, themeOptions, rgbList };
 })();

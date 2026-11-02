@@ -1295,7 +1295,7 @@ App.settings = (function () {
   // 注意：saveSettings 会替换 settings 对象引用，绝不能缓存旧对象，否则会“点两次才生效”
   const live = () => App.state.data.settings;
   const reapply = () => App.themes.applyFromSettings(live());
-  function systemIsDark() { return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches); }
+  function systemIsDark() { return App.themes.systemIsDark ? App.themes.systemIsDark() : !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches); }
   function sideIsEffective(side) {
     const ap = live().appearance || 'auto';
     if (ap === 'auto') return side === (systemIsDark() ? 'night' : 'day');

@@ -110,6 +110,41 @@ App.ui = (function () {
     return { close, el: m, body: m };
   }
 
+  // —— 全屏页 ——
+  // 与 modal 共用同一个关闭栈（返回键先关最上层），但占满整屏、内容区独立滚动、
+  // 底部操作按钮固定 —— 新建/编辑记录这类长表单用它，不再挤在弹窗里。
+  function fullPage({ title, body, actions, onClose }) {
+    const root = document.getElementById('modal-root');
+    const wrap = el('div', { class: 'page-sheet' });
+    const backBtn = el('button', { class: 'icon-btn page-sheet-back', html: icon('x', 22), title: '关闭' });
+    const head = el('div', { class: 'page-sheet-head' },
+      el('div', { class: 'psh-side psh-left' }, backBtn),
+      el('h3', { class: 'psh-title', text: title || '' }),
+      el('div', { class: 'psh-side psh-right' }));
+    const bodyWrap = el('div', { class: 'page-sheet-body' });
+    if (typeof body === 'string') bodyWrap.appendChild(el('div', { html: body }));
+    else if (body) bodyWrap.appendChild(body);
+    const foot = el('div', { class: 'page-sheet-foot' });
+    function close() {
+      const i = modalStack.indexOf(close);
+      if (i > -1) modalStack.splice(i, 1);
+      wrap.remove();
+      if (onClose) onClose();
+    }
+    (actions || []).forEach((a) => {
+      const b = el('button', { class: 'btn' + (a.primary ? ' primary' : '') + (a.danger ? ' danger' : ''), text: a.label });
+      b.addEventListener('click', () => { if (a.onClick) a.onClick(close); else close(); });
+      foot.appendChild(b);
+    });
+    backBtn.addEventListener('click', close);
+    wrap.appendChild(head);
+    wrap.appendChild(bodyWrap);
+    if (actions && actions.length) wrap.appendChild(foot);
+    modalStack.push(close);
+    root.appendChild(wrap);
+    return { close, el: wrap, body: bodyWrap };
+  }
+
   // —— 统一的「+n 数值」居中弹窗（仪表盘 / 目标页共用，UI 完全一致）——
   function promptNumber({ title, tip, placeholder, okLabel, onConfirm }) {
     const numI = el('input', { class: 'input', type: 'number', min: '1', step: '1', inputmode: 'numeric', placeholder: placeholder || '输入要增加的数值' });
@@ -819,7 +854,7 @@ App.ui = (function () {
   }
 
   return {
-    el, clear, mount, icon, iconEl, toast, modal, confirmDialog, promptNumber, makeThumb, makeCoverBlob,
+    el, clear, mount, icon, iconEl, toast, modal, fullPage, confirmDialog, promptNumber, makeThumb, makeCoverBlob,
     COVER_W, COVER_H,
     makeSelect, closeSelMenu, openCalendar, openColorPicker, closeColorPicker, openImageViewer,
     closeImageViewer, isImageViewerOpen, closeTopLayer,

@@ -725,15 +725,77 @@ App.records = (function () {
     (domain.customFields || []).forEach((f) => { const v = (rec.customValues || {})[f.id]; if (v == null || v === '') return; let txt = String(v); if (f.type === 'select') { const o = (f.options || []).find((o) => o.id === v); txt = o ? o.name : txt; } cfRow.appendChild(U().el('span', { class: 'chip', title: f.name, html: '<b>' + f.name + '：</b>' + txt })); });
 
     // —— 评论区：输入框置顶（小红书式）+ 时间排序（默认最新在上）——
+    // 楼层号按「时间正序」固定计算（最早的 = 1 楼），与当前显示顺序无关：
+    // 切到「最新在上」时看到的是 N楼…2楼…1楼，楼层不会跟着显示顺序短路。
     let commentDesc = true; // true = 最新在上（时间降序）
     const commentsBox = U().el('div', {});
+    function floorMap() {
+      const asc = (rec.comments || []).slice().sort((a, b) => a.createdAt - b.createdAt);
+      const map = {};
+      asc.forEach((c, i) => { map[c.id] = i + 1; });
+      return map;
+    }
+    async function removeComment(id) {
+      rec.comments = (rec.comments || []).filter((c) => c.id !== id);
+      await App.db.saveRecord(rec);
+      renderComments();
+      commentCountEl.textContent = '评论 · ' + rec.comments.length;
+      U().toast('已删除评论', 'ok');
+    }
+    // 删除入口：真机走系统原生底部操作菜单（plus.nativeUI.actionSheet），
+    // 网页预览没有 plus，退化为浏览器原生 confirm —— 不使用网页自绘弹窗。
+    function askDeleteComment(c) {
+      const plus = window.plus;
+      if (plus && plus.nativeUI && typeof plus.nativeUI.actionSheet === 'function') {
+        plus.nativeUI.actionSheet({ title: '这条评论', cancel: '取消', buttons: [{ title: '删除' }] }, (e) => {
+          if (e && e.index === 1) removeComment(c.id);
+        });
+        return;
+      }
+      if (typeof window.confirm === 'function' && window.confirm('删除这条评论？')) removeComment(c.id);
+    }
+    // 长按：触摸/鼠标按住 480ms 触发，移动超过 8px 视为滚动/滑动，取消长按。
+    let lastLongAt = 0;
+    function bindLongPress(node, fn) {
+      let timer = null, sx = 0, sy = 0;
+      const fire = () => {
+        const now = Date.now();
+        if (now - lastLongAt < 700) return;   // 手机会同时派发 contextmenu，去重
+        lastLongAt = now;
+        fn();
+      };
+      const start = (x, y) => {
+        sx = x; sy = y;
+        clearTimeout(timer);
+        timer = setTimeout(fire, 480);
+      };
+      const move = (x, y) => {
+        if (Math.abs(x - sx) > 8 || Math.abs(y - sy) > 8) { clearTimeout(timer); timer = null; }
+      };
+      const stop = () => { clearTimeout(timer); timer = null; };
+      node.addEventListener('touchstart', (e) => { if (e.touches.length === 1) start(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
+      node.addEventListener('touchmove', (e) => { if (e.touches.length === 1) move(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
+      node.addEventListener('touchend', stop, { passive: true });
+      node.addEventListener('touchcancel', stop, { passive: true });
+      node.addEventListener('mousedown', (e) => { if (e.button === 0) start(e.clientX, e.clientY); });
+      node.addEventListener('mousemove', (e) => move(e.clientX, e.clientY));
+      node.addEventListener('mouseup', stop);
+      node.addEventListener('mouseleave', stop);
+      node.addEventListener('contextmenu', (e) => { e.preventDefault(); stop(); fire(); });
+    }
     function renderComments() {
       U().clear(commentsBox);
+      const floors = floorMap();
       const list = (rec.comments || []).slice().sort((a, b) => commentDesc ? (b.createdAt - a.createdAt) : (a.createdAt - b.createdAt));
       if (!list.length) { commentsBox.appendChild(U().el('div', { class: 'muted', style: { fontSize: '0.85rem', padding: '4px 2px' }, text: '还没有评论' })); return; }
       list.forEach((c) => {
-        commentsBox.appendChild(U().el('div', { class: 'comment' },
-          U().el('div', { class: 'c-text' }, U().el('div', { text: c.text }), U().el('div', { class: 'c-time', text: U().fmtDateTime(c.createdAt) }))));
+        const timeLine = U().el('div', { class: 'c-time' },
+          U().el('span', { text: U().fmtDateTime(c.createdAt) }),
+          U().el('span', { class: 'c-floor', text: ' · ' + (floors[c.id] || 1) + '楼' }));
+        const item = U().el('div', { class: 'comment', 'data-cid': c.id },
+          U().el('div', { class: 'c-text' }, U().el('div', { text: c.text }), timeLine));
+        bindLongPress(item, () => askDeleteComment(c));
+        commentsBox.appendChild(item);
       });
     }
     const commentCountEl = U().el('span', { text: '评论 · ' + (rec.comments || []).length });
@@ -821,7 +883,8 @@ App.records = (function () {
     function onDown(e) {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       const t = e.target;
-      if (t.closest && t.closest('input,textarea,button,select,a,label')) return;
+      // 评论区长按要弹删除菜单，不能同时被当作翻页手势起点
+      if (t.closest && t.closest('input,textarea,button,select,a,label,.comment')) return;
       // 手势从整页任意「非交互」区域都能发起（修复「图片外区域滑动毫无反应」）。
       // 是否落在图片区只用于区分后续是「切换图」还是「翻整页」，不再拦截起始位置。
       const onCarousel = !!(carousel && carousel.contains(t));
@@ -962,34 +1025,67 @@ App.records = (function () {
     rebuildCustom();
 
     const fileInput = U().el('input', { type: 'file', accept: 'image/*', multiple: true, style: { display: 'none' } });
-    const drop = U().el('div', { class: 'file-drop', html: '<div style="font-size:26px">🖼️</div><div>点击或拖拽上传图片（可多张）</div>' });
-    const prevBox = U().el('div', { class: 'img-preview' });
-    function renderPreview() { U().clear(prevBox); imageIds.forEach((id) => { const cell = U().el('div', { class: 'ip' }); const im = U().el('img'); fillThumb(im, id); const rm = U().el('div', { class: 'rm', text: '×' }); rm.addEventListener('click', async (e) => { e.stopPropagation(); await App.storage.deleteImage(id); imageIds = imageIds.filter((x) => x !== id); renderPreview(); }); cell.appendChild(im); cell.appendChild(rm); prevBox.appendChild(cell); }); }
-    drop.addEventListener('click', () => fileInput.click());
+    // 图片区：全屏页最顶端，大尺寸网格预览（空态是一整块上传区）
+    const mediaBox = U().el('div', { class: 'media-grid' });
+    function renderPreview() {
+      U().clear(mediaBox);
+      if (!imageIds.length) {
+        mediaBox.classList.add('empty');
+        const drop = U().el('div', { class: 'media-drop' }, U().el('div', { class: 'md-icon', text: '🖼️' }), U().el('div', { class: 'md-text', text: '点击添加图片' }), U().el('div', { class: 'md-sub', text: '可多选，支持拖拽' }));
+        drop.addEventListener('click', () => fileInput.click());
+        mediaBox.appendChild(drop);
+        return;
+      }
+      mediaBox.classList.remove('empty');
+      imageIds.forEach((id) => {
+        const cell = U().el('div', { class: 'mg-item' });
+        const im = U().el('img');
+        fillThumb(im, id);
+        const rm = U().el('div', { class: 'rm', text: '×' });
+        rm.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          await App.storage.deleteImage(id);
+          imageIds = imageIds.filter((x) => x !== id);
+          renderPreview();
+        });
+        cell.appendChild(im); cell.appendChild(rm);
+        mediaBox.appendChild(cell);
+      });
+      const add = U().el('div', { class: 'mg-add', html: U().icon('plus', 22) + '<span>添加</span>' });
+      add.addEventListener('click', () => fileInput.click());
+      mediaBox.appendChild(add);
+    }
     fileInput.addEventListener('change', async () => { await handleFiles(fileInput.files); fileInput.value = ''; });
-    ['dragover', 'dragenter'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('drag'); }));
-    ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('drag'); }));
-    drop.addEventListener('drop', async (e) => { if (e.dataTransfer && e.dataTransfer.files) await handleFiles(e.dataTransfer.files); });
+    ['dragover', 'dragenter'].forEach((ev) => mediaBox.addEventListener(ev, (e) => { e.preventDefault(); mediaBox.classList.add('drag'); }));
+    ['dragleave', 'drop'].forEach((ev) => mediaBox.addEventListener(ev, (e) => { e.preventDefault(); mediaBox.classList.remove('drag'); }));
+    mediaBox.addEventListener('drop', async (e) => { if (e.dataTransfer && e.dataTransfer.files) await handleFiles(e.dataTransfer.files); });
     async function handleFiles(files) { for (const f of files) { if (!f.type || f.type.indexOf('image/') !== 0) { U().toast('已跳过非图片文件', 'err'); continue; } const th = await U().makeThumb(f); const id = App.storage.uid(); await App.storage.saveImage(Object.assign({ id }, th)); imageIds.push(id); sessionAdded.push(id); } renderPreview(); U().toast('已添加 ' + files.length + ' 张图片', 'ok'); }
     renderPreview();
 
     function field(label, ...controls) { return U().el('div', { class: 'field' }, U().el('label', { text: label }), ...controls); }
 
-    const body = U().el('div', {},
-      field('标题', titleI),
-      field((domain.timeLabel || '投入时长') + '（分钟）', timeI),
+    // 文字输入：标题一行、正文一块（都不带边框，像原生发布页）
+    titleI.className = 'ed-title';
+    descI.className = 'ed-desc';
+    const timeRow = U().el('div', { class: 'row', style: { gap: '8px' } }, dateBtn, U().el('div', { class: 'ed-inline' }, timeI, U().el('span', { class: 'muted', text: '分钟' })));
+    const moneyRow = U().el('div', { class: 'row', style: { gap: '10px' } }, U().el('div', { class: 'ed-inline' }, U().el('span', { class: 'muted', text: '收入 ¥' }), incI), U().el('div', { class: 'ed-inline' }, U().el('span', { class: 'muted', text: '支出 ¥' }), expI));
+
+    // 顺序：图片 → 标题 → 正文 → 分类 → 标签 → 时间 → 金额 → 自定义属性
+    const body = U().el('div', { class: 'ed-form' },
+      U().el('div', { class: 'ed-media' }, mediaBox, fileInput),
+      titleI,
+      descI,
       field('分类', catWrap),
       field('标签', tagBox),
-      field('自定义属性', cfWrap),
-      field('文字说明', descI),
-      field('图片', drop, fileInput, prevBox),
-      U().el('div', { class: 'row' }, field('收入 (¥)', incI), field('支出 (¥)', expI)),
-      field('日期', dateBtn),
+      field('时间', timeRow),
+      field('金额', moneyRow),
+      (domain.customFields && domain.customFields.length) ? field('自定义属性', cfWrap) : null,
     );
 
     let saved = false;
-    const m = U().modal({
-      title: existing ? '编辑记录' : '新建记录', body, wide: true,
+    const m = U().fullPage({
+      title: existing ? '编辑记录' : '新建记录',
+      body,
       onClose: () => { if (!saved) sessionAdded.forEach((id) => App.storage.deleteImage(id).catch(() => {})); },
       actions: [
         { label: '取消', onClick: (close) => close() },

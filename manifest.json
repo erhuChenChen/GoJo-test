@@ -3,8 +3,8 @@
     "id" : "H51962451", /*应用的标识*/
     "name" : "GoJo图记", /*应用名称，程序桌面图标名称*/
     "version" : {
-        "name" : "1.26.1101", /*应用版本名称*/
-        "code" : 101
+        "name" : "1.2.261101", /*应用版本名称*/
+        "code" : 102
     },
     "description" : "GoJo——本地化图文管理笔记。", /*应用描述信息*/
     "icons" : {
@@ -50,6 +50,11 @@
         "Share" : {}
     },
     "plus" : {
+        "launchwebview" : {
+            "statusbar" : {
+                "background" : "#FFFFFF"
+            }
+        },
         "splashscreen" : {
             "autoclose" : true, /*是否自动关闭程序启动界面，true表示应用加载应用入口页面后自动关闭；false则需调plus.navigator.closeSplashscreen()关闭*/
             "waiting" : false /*是否在程序启动界面显示等待雪花，true表示显示，false表示不显示。*/
