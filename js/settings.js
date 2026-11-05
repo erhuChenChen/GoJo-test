@@ -7,9 +7,53 @@ App.settings = (function () {
   let tabDragEndAt = 0; // 拖动结束时间戳：用来吞掉紧随其后的那次 click
 
   const TABS = [
-    { key: 'domains', label: '领域' }, { key: 'cattag', label: '分类标签' }, { key: 'customfields', label: '自定义属性' },
-    { key: 'dash', label: '仪表盘' }, { key: 'goal', label: '目标' }, { key: 'theme', label: '主题' }, { key: 'backup', label: '备份' },
+    { key: 'about', label: '关于' },{ key: 'domains', label: '领域' }, { key: 'cattag', label: '分类标签' },
+    { key: 'customfields', label: '自定义属性' }, { key: 'dash', label: '仪表盘' }, { key: 'goal', label: '目标' },
+    { key: 'theme', label: '主题' }, { key: 'backup', label: '备份' },
+    
   ];
+
+  // ===== 关于页配置 =====
+  // 兜底版本号：只有拿不到运行时版本时才用它（原生打包后优先读 plus.runtime.version，
+  // 也就是 manifest.json 里配置的 versionName，改了包名/版本号这里不需要跟着改）。
+  const APP_VERSION = '1.0.0';
+  // 检查更新要请求的 GitHub 仓库，格式 '用户名/仓库名'。
+  // 例如仓库是 https://github.com/zhangsan/gojo 就填 'zhangsan/gojo'。
+  // 留空则点「检查更新」会提示未配置（不会报错、不会白屏）。
+  const UPDATE_REPO = 'erhuChenChen/GoJo-test';
+  // 使用说明：直接平铺展示的文字，整段替换成你自己的内容即可。
+  // 这里的内容会按 Markdown 渲染（## 是二级标题、- 是列表项、**文字** 是加粗），
+  // 写普通换行也可以，会原样换行显示。
+  const ABOUT_USAGE = [
+    '## 一、这是什么',
+    'GoJo 是一个纯本地的图文记录工具：写下今天做了什么，纯文字或者图文记录，按领域归档。',
+    '所有数据只存在你的手机里，不联网、不上传、不需要账号。',
+    '',
+    '## 二、基本使用',
+    '1. 添加记录：底部「记录」页 → 右下角 + → 写标题 / 正文 / 加图 → 保存。',
+    '2. 图文记录：点开一条记录，左右滑动切换，正文支持Markdown语法。',
+    '3. 评论：记录详情页底部可以给这条记录追加评论，长按评论可删除。',
+    '4. 自定义设置：「设置」页提供多种自定义功能，可滑动拖拽设置项排序。',
+    '',
+    '## 三、图片存在哪',
+    '上传的图片会存进手机相册的 Pictures/GoJo 文件夹（没这个文件夹会自动创建），记录里只保存图片的路径。所以：',
+    '',
+    '- 在相册里能直接看到这些图，也能用其它 App 打开；',
+    '- 如果在相册里把某张图删了，记录里那张图会显示「图片丢失」，不会崩；',
+    '**⚠️注意：在 App 里删记录时，相册里对应 Pictures/GoJo 文件夹的图片也会一起删掉；同样的，在相册里删除 Pictures/GoJo 文件夹的图片，App 里对应的图片也会一起删掉。**',
+    '',
+    '## 四、备份与恢复',
+    '设置 → 备份 → 导出全部数据，会生成一个 `.gtbackup` 文件，存放在 **手机存储/Download/GoJobackup**，里面包含数据和你所有的原图。',
+    '',
+    '换手机时：旧机导出 → 把文件拷到新机 → 新机「导入备份恢复」。导入会把图片重新释放到相册，再把记录接上。',
+    '**⚠️注意：卸载 App 会清除本地数据，请务必定期导出备份！**',
+    '',
+    '## 五、常见问题',
+    '',
+    '- 换手机后图片显示不出来？先确认导入时是否允许了存储权限。',
+    '- 想省空间？设置 → 备份 → 清理缓存，只删缩略图，原图不动。',
+
+  ].join('\n');
 
   function render(container) {
     U().clear(container);
@@ -140,6 +184,7 @@ App.settings = (function () {
     else if (activeTab === 'goal') renderGoal(content);
     else if (activeTab === 'theme') renderTheme(content);
     else if (activeTab === 'backup') renderBackup(content);
+    else if (activeTab === 'about') renderAbout(content);
   }
 
   // 设置页子 Tab 左右滑动切换（由全局手势调用）。按当前排列顺序移动，
@@ -1476,9 +1521,31 @@ App.settings = (function () {
     }
   }
 
+  // 外观模式说明文案的实时刷新。
+  // 系统切深浅色时设置页不会重渲染，所以由 themes.js 每次主题落地广播 app:theme，
+  // 这里就地改文本，绝不重渲染整页（否则会打断就地展开的调色盘）。
+  let noteTimer = 0, noteBound = false;
+  function syncAppearanceNote() {
+    // 每次现取节点：renderTheme 会 U().clear 整块重建，闭包里的旧引用可能已经卸载
+    const el = document.querySelector('.ap-note');
+    if (!el) return;
+    // fresh=true：事件驱动，绕开 350ms 缓存，避免「主题已经是深色、文案还写浅色」的窗口
+    const t = App.themes.appearanceNote(live(), true);
+    if (el.textContent !== t) el.textContent = t;   // 同值不写，调色盘高频刷色时不做无用写
+  }
+  function bindThemeLive() {
+    if (noteBound) return;   // 全局只注册一次
+    noteBound = true;
+    // 合并高频广播（拖调色盘时 apply 会被连续调用），120ms 内只刷新一次
+    const soon = () => { clearTimeout(noteTimer); noteTimer = setTimeout(syncAppearanceNote, 120); };
+    document.addEventListener('app:theme', soon, false);   // 主链路：系统切深浅 → 主题落地 → 广播
+    document.addEventListener('resume', soon, false);      // 兜底：从系统设置切回 App
+  }
+
   function renderTheme(content, animateEditor) {
     const cur = live();
     U().clear(content);
+    bindThemeLive();   // 让「当前系统为深/浅色」跟着系统实时变
 
     // 外观模式
     content.appendChild(U().el('div', { class: 'section-title', text: '外观模式' }));
@@ -1487,10 +1554,7 @@ App.settings = (function () {
       reapply(); renderTheme(content);
     }));
     const ap = cur.appearance || 'auto';
-    const apText = ap === 'auto'
-      ? ('跟随系统 · 当前系统为' + (systemIsDark() ? '深色（使用夜间主题）' : '浅色（使用日间主题）'))
-      : (ap === 'day' ? '固定日间模式' : '固定夜间模式');
-    content.appendChild(U().el('div', { class: 'muted', style: { fontSize: '0.75rem', marginTop: '8px' }, text: apText }));
+    content.appendChild(U().el('div', { class: 'muted ap-note', style: { fontSize: '0.75rem', marginTop: '8px' }, text: App.themes.appearanceNote(cur) }));
 
     // 全局字号（四档，持久化保存）
     const fsLabels = [['small', '小'], ['standard', '标准'], ['large', '大'], ['xlarge', '超大']];
@@ -1521,7 +1585,6 @@ App.settings = (function () {
       const grid = U().el('div', { class: 'gallery', style: { gridTemplateColumns: 'repeat(3,1fr)', marginTop: '10px' } });
       App.themes.themeOptions(live()).forEach((opt) => grid.appendChild(themeSwatch(opt, opt.key === currentKey, (k) => pickSide(side, k), editTheme)));
       const wrap = U().el('div', { style: { marginTop: '18px' } }, U().el('div', { class: 'section-title', text: title }), grid);
-      if (!sideIsEffective(side)) wrap.appendChild(U().el('div', { class: 'muted', style: { fontSize: '0.75rem', marginTop: '6px' }, text: '该主题在当前外观模式下不生效，切换到对应模式即可看到。' }));
       return wrap;
     }
 
@@ -1659,19 +1722,22 @@ App.settings = (function () {
     const cacheHint = U().el('div', {
       class: 'muted exp-tip',
       style: { marginTop: '8px' },
-      text: '清理的是列表预览用的缩略图文件（含内存缓存），原图与记录不会被删除。',
+      text: '清理旧版本遗留的模糊小图、本机缩略图缓存，以及「相册里已删除、但 App 还残留」的图片记录；原图与正常记录不会被删除。',
     });
-    const cacheB = U().el('button', { class: 'btn block', html: U().icon('trash', 18) + '<span>清理缓存（删除缩略图，释放空间）</span>' });
+    const cacheB = U().el('button', { class: 'btn block', html: U().icon('trash', 18) + '<span>清理小图与缓存（释放空间）</span>' });
     cacheB.addEventListener('click', async () => {
-      if (!(await U().confirmDialog('将删除本机全部缩略图文件，只影响列表预览速度，原图与记录完整保留。删除后无法恢复（需要时会由原图重新生成），是否继续？', { okLabel: '清理缩略图', danger: true }))) return;
+      if (!(await U().confirmDialog('将清理：① 相册 GoJo 目录里宽度小于 400px 的模糊小图；② 本机缩略图缓存；③ 相册里已删除、但 App 还残留的图片记录（自动摘除其引用）。原图与正常记录完整保留，是否继续？', { okLabel: '立即清理', danger: true }))) return;
       cacheB.disabled = true;
-      U().toast('正在清理缩略图…');
-      let r = { count: 0, bytes: 0 };
+      U().toast('正在清理…');
+      let r = { count: 0, bytes: 0 }, junk = { scanned: 0, removed: 0 }, recon = { checked: 0, removed: 0 };
       try { r = await App.storage.clearThumbs(); } catch (e) { console.error(e); }
+      try { junk = await App.storage.cleanAlbumJunk(); } catch (e) { console.error(e); }
+      try { recon = await App.storage.reconcileAlbumMissing(); } catch (e) { console.error(e); }
       cacheB.disabled = false;
       refreshUsage();
-      if (!r.count) { U().toast('没有可清理的缩略图', 'ok'); return; }
-      U().toast('已删除 ' + r.count + ' 个缩略图' + (r.bytes ? '，释放约 ' + fmtSize(r.bytes) : '') + '（原图未动）', 'ok');
+      const total = (r.count || 0) + (junk.removed || 0) + (recon.removed || 0);
+      if (!total) { U().toast('没有可清理的内容', 'ok'); return; }
+      U().toast('已清理 ' + total + ' 项' + (junk.removed ? '（相册小图 ' + junk.removed + ' 张）' : '') + (r.bytes ? '，释放约 ' + fmtSize(r.bytes) : '') + (recon.removed ? '；并清理相册已删的残留记录 ' + recon.removed + ' 条' : '') + '（原图与正常记录未动）', 'ok');
     });
 
     // 分领域导出（自定义深色下拉）
@@ -1683,11 +1749,22 @@ App.settings = (function () {
     const clearB = U().el('button', { class: 'btn danger block', html: U().icon('trash', 18) + '<span>清空所有数据</span>' });
     clearB.addEventListener('click', async () => {
       if (!(await U().confirmDialog('将删除全部领域、记录、图片与设置，且不可恢复。建议先导出备份。', { okLabel: '确认清空', danger: true }))) return;
+      // 先把相册里的原图删干净（只删 Pictures/GoJo 内的），再清库，避免相册里留一堆孤儿图
+      try {
+        const imgs = (await App.storage.getAll('images')) || [];
+        await App.storage.deleteImages(imgs.map((i) => i.id));
+      } catch (e) {}
       await App.storage.clear('kv'); await App.storage.clear('domains'); await App.storage.clear('records'); await App.storage.clear('images');
       await App.state.init(); U().toast('已清空', 'ok'); App.app.boot();
     });
 
-    content.appendChild(U().el('div', { class: 'card' }, U().el('p', { class: 'muted', style: { marginBottom: '12px' }, text: '数据仅保存在本设备本地，不联网。换设备时：先在本机导出，再到新设备导入即可同步。' }), exp, expHint, U().el('div', { style: { height: '10px' } }), imp, impCompat, fileI, fileAny));
+    const intro = U().el('p', {
+      class: 'muted',
+      style: { marginBottom: '12px' },
+      html: '数据仅保存在本设备本地，不联网。原图存在手机相册「<b>Pictures/GoJo</b>」里，导出备份时会把它们一起打包。'
+        + '<br>换设备时：先在本机导出，再到新设备导入即可同步（导入会把图片重新释放到相册）。',
+    });
+    content.appendChild(U().el('div', { class: 'card' }, intro, exp, expHint, U().el('div', { style: { height: '10px' } }), imp, impCompat, fileI, fileAny));
     content.appendChild(U().el('div', { style: { height: '14px' } }));
     content.appendChild(U().el('div', { class: 'section-title', text: '存储管理' }));
     content.appendChild(U().el('div', { class: 'card' }, usageEl, U().el('div', { style: { height: '10px' } }), cacheB, cacheHint));
@@ -1696,6 +1773,163 @@ App.settings = (function () {
     content.appendChild(U().el('div', { class: 'card' }, U().el('div', { class: 'muted exp-tip', style: { marginBottom: '10px' }, html: '仅导出单个领域的数据与图片，便于按领域备份。<br>文件同样保存到「<b>手机存储/Download/GoJobackup</b>」。' }), domSel, U().el('div', { style: { height: '10px' } }), expDom));
     content.appendChild(U().el('div', { style: { height: '14px' } }));
     content.appendChild(clearB);
+  }
+
+  // —— 关于 ——
+  // 自上而下：版本号 → 检查更新按钮 → 使用说明（长文本平铺）。
+  // 检查更新：请求 GitHub Releases API，取最新 tag_name 与本地版本比较。
+
+  // ===== 版本号：一律从运行时读，绝不写死 =====
+  // 5+（HBuilderX）打包后：
+  //   plus.runtime.version     → 版本名称（manifest 里的 versionName，如 2.0.0）
+  //   plus.runtime.versionCode → 版本号（manifest 里的 versionCode，整数，每次发版必须递增）
+  // Capacitor 包的版本是异步接口，取到后写进 RUNTIME_* 变量并回填界面。
+  // 只有运行时完全取不到（纯网页预览）时，才退回下面的 APP_VERSION 常量。
+  let RUNTIME_VERSION = '';
+  let RUNTIME_VERSION_CODE = '';
+  function plusRuntime() {
+    try {
+      const p = window.plus;
+      if (p && p.runtime) return p.runtime;
+    } catch (e) {}
+    return null;
+  }
+  function appVersion() {
+    if (RUNTIME_VERSION) return RUNTIME_VERSION;
+    const rt = plusRuntime();
+    if (rt && rt.version) return String(rt.version);   // versionName
+    return APP_VERSION;                                // 常量兜底
+  }
+  function appVersionCode() {
+    if (RUNTIME_VERSION_CODE !== '') return RUNTIME_VERSION_CODE;
+    const rt = plusRuntime();
+    if (rt && rt.versionCode !== undefined && rt.versionCode !== null && String(rt.versionCode) !== '') {
+      return String(rt.versionCode);
+    }
+    return '';                                         // 网页预览没有版本序号，不显示
+  }
+  // 界面上统一用这个：v2.0.0 (100)；拿不到 versionCode 时只显示 v2.0.0
+  function versionLabel() {
+    const v = appVersion();
+    const c = appVersionCode();
+    return 'v' + v + (c ? ' (' + c + ')' : '');
+  }
+  function vParts(v) {
+    return String(v || '').replace(/^v/i, '').split(/[.\-+_]/).map((x) => parseInt(x, 10) || 0);
+  }
+  function vCompare(a, b) {
+    const A = vParts(a), B = vParts(b);
+    const n = Math.max(A.length, B.length);
+    for (let i = 0; i < n; i++) {
+      const x = A[i] || 0, y = B[i] || 0;
+      if (x !== y) return x > y ? 1 : -1;
+    }
+    return 0;
+  }
+  function openExternal(url) {
+    if (!url) return;
+    try {
+      if (window.plus && plus.runtime && typeof plus.runtime.openURL === 'function') { plus.runtime.openURL(url); return; }
+    } catch (e) {}
+    try { window.open(url, '_blank'); } catch (e) {}
+  }
+  function fetchJSON(url, ms) {
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const timer = setTimeout(() => { if (!done) { done = true; reject(new Error('请求超时，请检查网络')); } }, ms || 12000);
+      const fin = (ok, val) => { if (done) return; done = true; clearTimeout(timer); ok ? resolve(val) : reject(val); };
+      try {
+        fetch(url, { headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store' })
+          .then((r) => {
+            if (r.status === 404) throw new Error('仓库或 Release 不存在（404）');
+            if (r.status === 403) throw new Error('请求过于频繁，请稍后再试（403）');
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then((j) => fin(true, j))
+          .catch((e) => fin(false, e));
+      } catch (e) { fin(false, e); }
+    });
+  }
+
+  function renderAbout(content) {
+    // ① 版本号（运行时读取：versionName + versionCode，取不到才用常量兜底）
+    const verText = U().el('div', { class: 'about-ver', text: versionLabel() });
+    const verCard = U().el('div', { class: 'card about-hero' },
+      U().el('div', { class: 'about-logo', text: 'GoJo' }),
+      verText);
+    // plus 是异步注入的：首屏渲染时可能还没就绪，先显示兜底值，plusready 后再刷新成真实版本
+    if (!(plusRuntime() && plusRuntime().version)) {
+      const refreshVer = () => {
+        if (!verText.parentNode) return;   // 用户已经切走了就不动
+        verText.textContent = versionLabel();
+      };
+      if (window.plus) setTimeout(refreshVer, 0);
+      else document.addEventListener('plusready', refreshVer, false);
+    }
+    // Capacitor 包：版本号要异步取，取到后回填（取不到就保持上面的值）
+    try {
+      const c = window.Capacitor;
+      if (c && c.Plugins && c.Plugins.App && c.Plugins.App.getInfo) {
+        c.Plugins.App.getInfo().then((info) => {
+          if (!info) return;
+          if (info.version) RUNTIME_VERSION = String(info.version);
+          if (info.build) RUNTIME_VERSION_CODE = String(info.build);
+          if (verText.parentNode) verText.textContent = versionLabel();
+        }).catch(() => {});
+      }
+    } catch (e) {}
+
+    // ② 检查更新
+    const updBox = U().el('div', { class: 'about-upd' });
+    const updBtn = U().el('button', { class: 'btn block', html: U().icon('download', 18) + '<span>检查更新</span>' });
+    let checking = false;
+    updBtn.addEventListener('click', async () => {
+      if (checking) return;
+      if (!UPDATE_REPO) {
+        U().clear(updBox);
+        updBox.appendChild(U().el('div', { class: 'muted about-upd-tip', text: '还没有配置更新仓库：请在 js/settings.js 顶部把 UPDATE_REPO 填成「用户名/仓库名」。' }));
+        return;
+      }
+      checking = true;
+      U().clear(updBox);
+      updBox.appendChild(U().el('div', { class: 'muted about-upd-tip', text: '正在检查…' }));
+      try {
+        const j = await fetchJSON('https://api.github.com/repos/' + UPDATE_REPO + '/releases/latest');
+        const tag = (j && (j.tag_name || j.name)) || '';
+        U().clear(updBox);
+        if (!tag) {
+          updBox.appendChild(U().el('div', { class: 'muted about-upd-tip', text: '没有读取到版本号，请稍后再试。' }));
+        } else if (vCompare(tag, appVersion()) > 0) {
+          updBox.appendChild(U().el('div', { class: 'about-upd-new', text: '发现新版本 ' + tag }));
+          const body = String((j && j.body) || '').trim();
+          if (body) updBox.appendChild(U().el('div', { class: 'muted about-upd-note', text: body.length > 600 ? body.slice(0, 600) + '…' : body }));
+          const go = U().el('button', { class: 'btn primary block', html: U().icon('download', 18) + '<span>前往下载</span>' });
+          go.addEventListener('click', () => openExternal(j && j.html_url));
+          updBox.appendChild(go);
+        } else {
+          updBox.appendChild(U().el('div', { class: 'about-upd-ok', text: '已是最新版本（' + versionLabel() + '）' }));
+        }
+      } catch (e) {
+        U().clear(updBox);
+        updBox.appendChild(U().el('div', { class: 'about-upd-err', text: '检查失败：' + ((e && e.message) || e) }));
+      }
+      checking = false;
+    });
+
+    // ③ 使用说明：直接平铺，不做折叠/按钮；文本按 Markdown 渲染（标题/列表/加粗都生效）
+    const doc = U().el('div', {
+      class: 'about-doc md-body',
+      html: (App.md && App.md.render) ? App.md.render(ABOUT_USAGE) : String(ABOUT_USAGE).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
+    });
+
+    content.appendChild(verCard);
+    content.appendChild(U().el('div', { style: { height: '12px' } }));
+    content.appendChild(updBtn);
+    content.appendChild(updBox);
+    content.appendChild(U().el('div', { style: { height: '18px' } }));
+    content.appendChild(U().el('div', { class: 'section-title', text: '使用说明' }));
+    content.appendChild(U().el('div', { class: 'card about-doc-card' }, doc));
   }
 
   // 物理返回键：设置页里的「就地改色」算一层临时状态，先收起编辑再谈返回

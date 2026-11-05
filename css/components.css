@@ -98,7 +98,10 @@
   color: var(--text); font-size: calc(var(--font-scale, 1) * 16px); outline: none; transition: border .2s, box-shadow .2s;
 }
 .input:focus, .textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.textarea { resize: vertical; min-height: 84px; }
+/* textarea（设置页分类名等）同样受安卓 WebView 行高 Bug 影响：它没显式设 line-height，
+   会继承 body 的 line-height:1.55（倍数），在真机上也会「回车空两行」。一并用固定长度 px 兜死，
+   并关掉 text-size-adjust。 */
+.textarea { resize: vertical; min-height: 84px; line-height: 1.4em; -webkit-text-size-adjust: none; text-size-adjust: none; }
 
 /* 进度条 */
 .progress { height: 9px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
@@ -215,6 +218,10 @@
 .record-card .rc-tag { flex: 0 0 auto; font-size: calc(var(--font-scale, 1) * 11.5px); color: var(--text-dim); font-weight: 600; line-height: 1.5; white-space: nowrap; }
 .record-card .rc-tag.muted { opacity: .7; }
 .record-card .rc-date { margin-top: auto; padding-top: 4px; font-size: calc(var(--font-scale, 1) * 11px); color: var(--text-dim); }
+/* 卡片脚注：日期在左、字数在右，两端对齐 —— 字数永远压在卡片右下角，同列卡片成一条线 */
+.record-card .rc-foot { margin-top: auto; padding-top: 4px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.record-card .rc-foot .rc-date { margin-top: 0; padding-top: 0; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.record-card .rc-count { flex: 0 0 auto; font-size: calc(var(--font-scale, 1) * 11px); line-height: 1.4; color: var(--text-dim); opacity: .9; white-space: nowrap; }
 
 /* 列表顶部工具条：左侧[添加/选择] 右侧[排序/筛选] 两端对齐，中间留白
    （display / 折行 / 横向滑动 / 锁宽 / 隐藏滚动条 已由顶部公共基类提供） */
@@ -257,6 +264,51 @@
 .list-tagrow .row-label { display: inline-flex; align-items: center; gap: 5px; font-size: calc(var(--font-scale, 1) * 12.5px); font-weight: 600; color: var(--text-dim); white-space: nowrap; }
 .list-tagrow .row-label svg { width: 14px; height: 14px; }
 
+/* ===== 标签筛选（下拉 + 菜单内搜索 + 多选）=====
+   按钮点开一个浮层：顶部输入框边打字边过滤，点某一项立刻生效但浮层不关，
+   已选标签在按钮右侧以「#标签 ×」常驻，点 × 取消。 */
+.list-tagrow { flex-wrap: wrap; white-space: normal; align-items: center; overflow: visible; }
+.list-tagrow .tag-picked { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.tag-picked-chip {
+  display: inline-flex; align-items: center; gap: 1px; height: 26px; box-sizing: border-box;
+  padding: 0 3px 0 10px; font-size: calc(var(--font-scale, 1) * 12px); border-radius: 999px;
+}
+.tag-picked-x {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0; border: none; border-radius: 50%;
+  background: transparent; color: var(--text-dim); cursor: pointer;
+}
+.tag-picked-x:hover { color: var(--danger); background: var(--surface-2); }
+.tag-picked-x svg { width: 11px; height: 11px; }
+
+.tag-panel {
+  position: fixed; z-index: 130; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px; max-height: min(52vh, 340px);
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 18px 44px rgba(0,0,0,0.45);
+  backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%);
+  animation: popIn .16s ease;
+}
+.tag-panel-search {
+  flex: 0 0 auto; width: 100%; height: 36px; min-height: 36px; box-sizing: border-box;
+  border-radius: var(--radius-pill); padding: 0 14px;
+  font-size: calc(var(--font-scale, 1) * 13px);
+}
+.tag-panel-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 2px; }
+.tag-opt {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; padding: 9px 10px; border: none; border-radius: 10px;
+  background: transparent; color: var(--text); text-align: left; cursor: pointer;
+  font-size: calc(var(--font-scale, 1) * 13.5px);
+}
+.tag-opt:hover { background: var(--accent-soft); }
+.tag-opt.on { background: var(--accent-soft); font-weight: 700; }
+.tag-opt-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-opt-mark { flex: 0 0 auto; display: inline-flex; color: var(--accent); }
+.tag-opt-mark svg { width: 14px; height: 14px; }
+.tag-panel-empty { padding: 14px 8px; text-align: center; font-size: calc(var(--font-scale, 1) * 12.5px); }
+
 /* 排序浮层（自定义排序：① 属性 ② 升/降序） */
 .sort-panel { position: fixed; z-index: 60; width: 248px; max-width: calc(100vw - 16px); background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow); padding: 12px; }
 .sort-panel .sp-title { font-size: calc(var(--font-scale, 1) * 12px); font-weight: 700; color: var(--text-dim); margin: 6px 2px; letter-spacing: .3px; }
@@ -267,6 +319,22 @@
 .comment { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .comment .c-text { flex: 1; }
 .comment .c-time { font-size: calc(var(--font-scale, 1) * 11px); color: var(--text-dim); margin-top: 3px; }
+/* 评论文字必须能自由选中：长按要能正常唤起系统选字手柄（复制的前提），
+   所以这里显式声明 user-select，并关掉安卓的点击高亮块 */
+.comment, .comment * { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+.comment { -webkit-tap-highlight-color: transparent; }
+/* 每条评论右侧的「···」删除入口。
+   user-select:none 是必须的 —— 上面那条 .comment * 把所有子节点都设成了可选中，
+   不排除的话长按按钮会先选中图标、再弹出系统气泡，删除反而点不到。 */
+.c-more {
+  flex: 0 0 auto; align-self: flex-start; width: 26px; height: 26px; margin-top: -2px;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; border: 0; background: transparent; color: var(--text-dim);
+  border-radius: 50%; -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+.c-more:active { background: var(--surface-2); color: var(--text); }
+.c-more svg { display: block; }
 
 /* 评论输入框（置顶，小红书式）：输入框与发送按钮同高、同为胶囊形、发送文字横排 */
 .comment-compose { gap: 8px; }
@@ -278,6 +346,8 @@
 .comment-sort svg { width: 15px; height: 15px; }
 /* 详情页文字说明：与下方标签拉开间距 */
 .detail-desc { margin-top: 12px; margin-bottom: 16px; white-space: pre-wrap; line-height: 1.7; }
+/* 详情页顶部「分类 + 日期」行里的「xx 字」：紧跟日期，纯文字，弱化处理 */
+.detail-count { font-size: calc(var(--font-scale, 1) * 12px); line-height: 1.6; align-self: center; flex: 0 0 auto; white-space: nowrap; }
 
 /* 弹窗 */
 .modal-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: flex-end; justify-content: center; }
@@ -432,8 +502,26 @@
 /* 记录卡片多选 */
 .record-card.selectable-card { position: relative; }
 .record-card.selectable-card:hover { transform: none; }
-.record-card .card-check { position: absolute; top: 8px; left: 8px; z-index: 3; width: 22px; height: 22px; cursor: pointer; }
+/* 勾选框在卡片右上角：自己画（老内核没有 accent-color，原生 checkbox 叠在深色磨砂封面上几乎看不见）。
+   白底 + 投影保证任何封面图上都清晰，选中后填充强调色并画一个对勾。 */
+.record-card .card-check {
+  position: absolute; top: 8px; right: 8px; left: auto; z-index: 3;
+  width: 21px; height: 21px; margin: 0; padding: 0; cursor: pointer;
+  -webkit-appearance: none; appearance: none;
+  border-radius: 6px; background: #fff; border: 1px solid rgba(0, 0, 0, 0.18);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.45);
+  -webkit-tap-highlight-color: transparent;
+}
+.record-card .card-check:checked { background: var(--accent); border-color: var(--accent); }
+.record-card .card-check:checked::after {
+  content: ''; position: absolute; left: 6px; top: 2px;
+  width: 6px; height: 11px;
+  border: 2px solid #fff; border-top: 0; border-left: 0;
+  -webkit-transform: rotate(42deg); transform: rotate(42deg);
+}
 .record-card.checked { outline: 2px solid var(--accent); }
+/* 纯文字卡片的标题在顶部，别被右上角的勾选框压住 → 提前让出位置改为省略号 */
+.record-card.no-cover.selectable-card .rc-title { padding-right: 26px; }
 
 /* 批量操作底部栏（屏幕最下方横向操作栏，仅 已选X条 / 移动 / 取消） */
 /* z-index 低于弹窗遮罩(50)，即使未隐藏也不会压住“选择领域”面板 */
@@ -441,6 +529,10 @@
 .batch-bar.hidden { display: none; }
 .batch-bar .batch-count { font-weight: 700; font-size: calc(var(--font-scale, 1) * 14px); }
 .batch-bar .batch-actions { display: flex; gap: 10px; }
+/* 批量栏按钮：320px 窄屏也要塞得下「移动 / 删除 / 取消」三个 */
+.batch-bar .btn { padding: 11px 12px; }
+/* 删除键标红：只作用于批量栏，不影响确认弹窗里的按钮 */
+.batch-bar .btn.danger { color: var(--danger); border-color: rgba(255, 107, 107, 0.38); background: rgba(255, 107, 107, 0.12); }
 
 /* 顶部全选复选框 */
 .select-all-row { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 8px 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-pill); font-size: calc(var(--font-scale, 1) * 13px); font-weight: 600; cursor: pointer; width: fit-content; }
@@ -578,8 +670,9 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 }
 
 /* ===== 详情页：传统单行图片轮播（只滑图片，正文不动）=====
-   每页 = 容器 100% 宽，位移 = -index * 100%；图片 object-fit: cover 铺满，
-   容器高度由 JS 按当前图片原始比例写入 aspect-ratio —— 四边都不会出现白边。 */
+   每页 = 容器 100% 宽，位移 = -index * 100%；图片 object-fit: contain，
+   容器高度由 JS 按当前图片原始比例写入（宽度撑满容器，高度按比例给足、不设上限）
+   —— 图片整张完整显示，上下左右都不会被裁。 */
 /* 撑满一屏：详情页内容之外的空白区域也属于 .detail-page，
    这样手指落在卡片下方的空白处才能命中手势监听（此前空白属于 #view，事件到不了）。 */
 .detail-page { touch-action: pan-y; min-height: calc(100vh - var(--header-h) - var(--nav-h) + 24px); }
@@ -592,10 +685,26 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
    所以不靠 CSS 比例；也不再给 4:3 的默认值，否则图片没加载时会先露出一块灰色空框）。
    真机（老内核 WebView）：子层 .dc-track 有 transform/will-change 会独立合成，
    父级 border-radius + overflow:hidden 裁不住它，圆角会丢失 —— 补 mask 强制裁剪。 */
-.detail-carousel { position: relative; display: block; box-sizing: border-box; width: 100%; max-width: 100%; margin: 0 0 12px; padding: 0; max-height: 66vh; overflow: hidden; border-radius: var(--radius, 16px); background: transparent; touch-action: pan-y; line-height: 0; font-size: 0; -webkit-mask-image: -webkit-radial-gradient(white, black); -webkit-transform: translateZ(0); transform: translateZ(0); }
+.detail-carousel { position: relative; display: block; box-sizing: border-box; width: 100%; max-width: 100%; margin: 0 0 12px; padding: 0; overflow: hidden; border-radius: var(--radius, 16px); background: transparent; touch-action: pan-y; line-height: 0; font-size: 0; -webkit-mask-image: -webkit-radial-gradient(white, black); -webkit-transform: translateZ(0); transform: translateZ(0); }
 .dc-track { display: flex; width: 100%; height: 100%; will-change: transform; }
 .dc-slide { flex: 0 0 100%; width: 100%; height: 100%; line-height: 0; }
-.dc-slide img { display: block; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; object-fit: cover; object-position: center center; -webkit-user-drag: none; user-select: none; }
+.dc-slide img { display: block; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; object-fit: contain; object-position: center center; -webkit-user-drag: none; user-select: none; }
+/* 原图丢失（相册里的文件被删了 / 被清理软件干掉）：这一页显示「图片丢失」，不裂图、不留空框 */
+.dc-lost {
+  width: 100%; height: 100%; min-height: 150px; box-sizing: border-box; padding: 24px 16px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  color: var(--text-dim); background: var(--surface-2); border: 1px solid var(--border); border-radius: inherit;
+  /* 轮播容器为了消掉图片底部间隙写了 line-height:0 / font-size:0，这里必须显式还原，
+     否则两行文字会算成 0 高度、叠在一起 */
+  font-size: calc(var(--font-scale, 1) * 13px); line-height: 1.5; text-align: center;
+}
+.dc-lost-icon { display: inline-flex; opacity: .6; }
+.dc-lost-text { font-weight: 700; color: var(--text); font-size: calc(var(--font-scale, 1) * 14px); }
+.dc-lost-sub { font-size: calc(var(--font-scale, 1) * 11.5px); }
+/* 全部图片都丢了：放开固定高度，别给用户留一块巨大的空灰框 */
+.detail-carousel.is-lost { height: auto !important; max-height: none; aspect-ratio: auto !important; }
+.detail-carousel.is-lost .dc-track { height: auto; }
+.detail-carousel.is-lost .dc-slide { height: auto; }
 .detail-carousel.grabbing { cursor: grabbing; }
 .dc-dots { position: absolute; left: 0; right: 0; bottom: 9px; display: flex; align-items: center; justify-content: center; gap: 5px; pointer-events: none; }
 .dc-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.45); box-shadow: 0 0 4px rgba(0,0,0,0.35); transition: background .18s ease, transform .18s ease; }
@@ -813,13 +922,28 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 
 /* 只读标签 / 可选标签：统一的「#文字」极简样式 */
 .tag-line { gap: 4px 10px; }
+/* 日期和字数之间收紧一点：.row 默认 10px 间距，这里要让字数看起来是「贴」在日期后面的 */
+.tag-line .detail-count { margin-left: -4px; }
 .tag-text { font-size: calc(var(--font-scale, 1) * 12.5px); font-weight: 600; color: var(--text-dim); line-height: 1.5; white-space: nowrap; }
+/* 详情页的标签是可点的：点了就跳到列表页、只看这个标签的记录。
+   用 --accent 而不是写死蓝色 —— 默认主题下本来就是蓝（深色 #8b9cff / 浅色 #4f8cff），
+   用户自定义主题时会跟着走，不会在暖色主题里突然冒出一块刺眼的硬编码蓝。
+   button 不继承字体，所以 font 必须显式 inherit。 */
+.tag-link {
+  background: none; border: 0; padding: 0; margin: 0; font: inherit;
+  color: var(--accent); cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.tag-link:active { opacity: .6; }
 /* 详情页分类：回到胶囊样式（不带 # 号），比极简标签更有“主体感” */
 .detail-cat { padding: 3px 11px; font-size: calc(var(--font-scale, 1) * 12px); font-weight: 700; line-height: 1.4; color: var(--text); }
 .tag-sel { display: inline-flex; align-items: center; gap: 3px; padding: 3px 2px; border-radius: var(--radius-pill); font-size: calc(var(--font-scale, 1) * 12.5px); font-weight: 600; color: var(--text-dim); cursor: pointer; user-select: none; transition: color .16s, background .16s, padding .16s; }
 .tag-sel.on { padding: 4px 11px; color: var(--accent); background: var(--accent-soft); font-weight: 700; }
 .tag-sel.tag-new { color: var(--text-dim); opacity: .85; }
 .tag-sel.tag-new svg { width: 12px; height: 12px; }
+/* 编辑器标签区：上面一个搜索框，下面标签云（输入即时过滤） */
+.tag-picker { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.tag-picker .tag-search { height: 36px; border-radius: var(--radius-pill); font-size: calc(var(--font-scale, 1) * 13.5px); padding: 0 14px; }
 .dots-menu { min-width: 138px; }
 
 /* Emoji 图标选择器（新增 / 重命名领域）*/
@@ -838,7 +962,9 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 }
 .page-sheet-head {
   flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: calc(env(safe-area-inset-top, 0px) + 6px) max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right)) 6px;
+  /* 上下只留 2px：40px 图标 + 2 + 2 + 1px 分隔线 = 45px（原来是 6+6，约 53px）。
+     编辑页顶栏要「矮一点」，但左右两个 40px 图标按钮的点击热区不能缩，否则容易点空。 */
+  padding: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 2px) max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right)) 2px;
   background: var(--bg-alpha, transparent);
   backdrop-filter: blur(18px) saturate(150%);
   -webkit-backdrop-filter: blur(18px) saturate(150%);
@@ -848,12 +974,17 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 .page-sheet-head .psh-side { flex: 0 0 40px; display: flex; align-items: center; }
 .page-sheet-head .psh-right { justify-content: flex-end; }
 .page-sheet-back { color: var(--text-dim); }
+/* 顶栏右上角的「保存」对勾：尺寸/圆角/热区与左上角的叉完全一致，只是用强调色区分主操作 */
+.page-sheet-save { color: var(--accent); }
 .page-sheet-body {
   flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  /* 关掉滚动锚定：正文 textarea 逐键长高时，锚定会和 pinScroll 互相拉扯，位置反而抖 */
+  overflow-anchor: none;
   padding: 12px max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right)) 20px;
 }
 .page-sheet-foot {
+  position: relative;   /* 字数胶囊以它为基准，用 bottom:100% 浮在栏顶上方 */
   flex: 0 0 auto; display: flex; gap: 10px;
   padding: 10px max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right)) calc(env(safe-area-inset-bottom, 0px) + 10px);
   background: var(--bg);
@@ -861,8 +992,94 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 }
 .page-sheet-foot .btn { flex: 1 1 0; height: 46px; }
 
+/* ===== 编辑页 Markdown 排版栏（.ed-dock，取代原底部「取消 / 保存」栏）=====
+   出现时机：正文聚焦才显示（.is-open），失焦 / 点到别处 180ms 后收起 —— 不常驻占屏。
+   高度严格 29px = 1px 上边线 + 28px 一行按钮 = 一行标准正文（16px × 1.78 ≈ 28.5px）。
+   【为什么不用 display:none 收起来】display 一换，.page-sheet-body 会瞬间矮 29px，
+   浏览器紧接着把光标重新滚进可视区 —— 用户看到的就是「点一下正文整页跳一下」。
+   所以高度永久占位，显隐只切 visibility / opacity / pointer-events，布局零抖动。 */
+.ed-dock {
+  flex: 0 0 auto; position: relative; z-index: 8;
+  display: flex; flex-direction: column;
+  box-sizing: border-box; height: 29px;
+  margin: 0;
+  padding: 0 max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right));
+  background: var(--bg); border-top: 1px solid var(--border);
+  visibility: hidden; opacity: 0; pointer-events: none;
+  transition: bottom .16s ease-out;
+}
+.ed-dock.is-open { visibility: visible; opacity: 1; pointer-events: auto; }
+/* 键盘是 adjustPan / 悬浮键盘时（视口没变矮）整条浮到键盘上沿 */
+.ed-dock.is-floating {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, .28);
+}
+
+/* 按钮行：横向滑动，绝不换行、不压缩按钮 */
+.ed-dock-tools {
+  flex: 0 1 auto; height: 100%; min-width: 0;
+  display: flex; align-items: center; gap: 0;
+  overflow-x: auto; overflow-y: hidden;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  margin: 0; padding: 0;
+}
+.ed-dock-tools::-webkit-scrollbar { display: none; }
+
+/* 单个按钮：32×28、右左间距 0 —— 整条只有一行正文那么高 */
+.ed-tool {
+  flex: 0 0 auto; width: 32px; height: 28px; box-sizing: border-box;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; border: 0; border-radius: 8px;
+  background: transparent; color: var(--text);
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none; user-select: none;
+  transition: background .12s ease, color .12s ease;
+}
+.ed-tool:active, .ed-tool.on { background: var(--accent-soft); color: var(--accent); }
+.ed-tool svg { display: block; }
+.ed-tool.is-off, .ed-tool[disabled] { opacity: .32; pointer-events: none; }
+.ed-tool-sep { flex: 0 0 auto; width: 1px; height: 14px; margin: 0 2px; background: var(--border); }
+
+/* H1–H5：一个下拉入口，不再平铺 5 个按钮 */
+.ed-tool-h { width: 40px; gap: 2px; }
+.ed-tool-h-txt { font-size: 13px; font-weight: 800; line-height: 1; }
+.ed-tool-h-chev { display: inline-flex; opacity: .72; }
+
+/* 标题菜单：必须挂在 .ed-dock 上（不能进 .ed-dock-tools —— 那里的 overflow-x:auto 会把它裁掉）。
+   .ed-dock 在流内是 position:relative、浮起时是 position:fixed，两种都是定位祖先，
+   所以 bottom:calc(100% + 6px) 在两种状态下都成立，不用 JS 量坐标。 */
+.ed-hmenu {
+  position: absolute; z-index: 60; width: 168px;
+  left: max(var(--page-pad), env(safe-area-inset-left));
+  bottom: calc(100% + 6px);
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .32), 0 2px 6px rgba(0, 0, 0, .18);
+  animation: edHMenuIn .12s ease-out;
+}
+.ed-hmenu.hidden { display: none; }
+.ed-hmenu-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  height: 38px; padding: 0 10px; border: none; border-radius: 9px;
+  background: transparent; color: var(--text); font-family: inherit;
+  text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.ed-hmenu-item:active { background: var(--accent-soft); }
+.ed-hmenu-k { flex: 0 0 22px; font-size: 11px; font-weight: 800; color: var(--text-dim); }
+.ed-hmenu-t { font-weight: 600; }
+.ed-hmenu-lv1 .ed-hmenu-t { font-size: 18px; font-weight: 800; }
+.ed-hmenu-lv2 .ed-hmenu-t { font-size: 16px; font-weight: 800; }
+.ed-hmenu-lv3 .ed-hmenu-t { font-size: 15px; font-weight: 700; }
+.ed-hmenu-lv4 .ed-hmenu-t { font-size: 14px; font-weight: 700; }
+.ed-hmenu-lv5 .ed-hmenu-t { font-size: 13px; font-weight: 700; }
+@keyframes edHMenuIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
 /* 全屏编辑表单：无边框输入，像原生发布页 */
-.ed-form { display: flex; flex-direction: column; }
+/* 编辑表单：底部留 8px —— 字数胶囊浮在排版栏上沿之外，表单末端不需要给它让位 */
+.ed-form { display: flex; flex-direction: column; padding-bottom: 8px; }
 .ed-media { margin: 2px 0 12px; }
 .ed-title {
   width: 100%; border: none; border-bottom: 1px solid var(--border); border-radius: 0;
@@ -871,19 +1088,63 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
   padding: 10px 2px 8px; outline: none;
 }
 .ed-title::placeholder { color: var(--text-dim); font-weight: 600; }
+/* 正文外层：只负责表单间距。
+   （字数胶囊已经从这一层挪到按钮栏上方，不再需要 position:relative 兜着它；
+   margin 仍留在这里 —— position:relative 不建立 BFC，放回 textarea 上会穿透出去。） */
+.ed-desc-wrap { position: relative; margin: 12px 0 16px; }
 .ed-desc {
-  width: 100%; min-height: 120px; margin-bottom: 16px;
+  width: 100%; min-height: 120px; margin: 0;
   border: none; border-bottom: 1px solid var(--border); border-radius: 0;
   background: transparent; color: var(--text); font-family: inherit;
-  font-size: calc(var(--font-scale, 1) * 15.5px); line-height: 1.6;
-  padding: 10px 2px; outline: none; resize: none;
+  /* 与详情页正文保持完全一致的排版（只对齐编辑态，不动详情样式）：
+     · 字号 1rem：详情正文继承 body 的 1rem(16px)，编辑框同值才能「每行字数」一致；
+     · 行高 1.78：详情生效的是 .md-body 的 line-height:1.78（同在元素上的 .detail-desc 的 1.7 被覆盖）；
+     · 左右内边距 17px：详情正文左起 = .view 16 + 卡片边框 1 + 卡片内边距 16 = 33px，
+       编辑页左起 = .page-sheet-body 16 + 17 = 33px；内容宽两边都 = 屏宽 − 66，换行点相同；
+     · text-size-adjust:none 关掉安卓字体自动放大，防止行高被重算。 */
+  font-size: 1rem;
+  line-height: 1.78;
+  -webkit-text-size-adjust: none; text-size-adjust: none;
+  white-space: pre-wrap;
+  /* 高度由 JS 按内容撑开（scrollHeight），所以这里不许出现内层滚动条。
+     底部留 8px：字数胶囊浮在排版栏上沿之外，框里不需要为它预留空白带。 */
+  padding: 8px 17px; outline: none; resize: none; overflow: hidden; display: block;
 }
 .ed-desc::placeholder { color: var(--text-dim); }
+
+/* 字数胶囊：极小、悬浮在正文右下角（编辑态与详情查看态共用）。 */
+.count-pill {
+  position: absolute; right: 6px; bottom: 6px; z-index: 2;
+  display: inline-flex; align-items: center;
+  height: 18px; box-sizing: border-box; padding: 0 8px;
+  border-radius: var(--radius-pill);
+  /* 用实色 --bg-2（深色 #1b1e25 / 浅色白）而不是半透明的 --surface-2：
+     半透明底叠在正文上等于没有底，胶囊里的字会和正文糊在一起。 */
+  background: var(--bg-2); border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: calc(var(--font-scale, 1) * 10.5px); font-weight: 600; line-height: 1;
+  letter-spacing: .2px; font-variant-numeric: tabular-nums;
+  white-space: nowrap; pointer-events: none;
+  -webkit-user-select: none; user-select: none;
+}
+/* 选中文字时切成「已选xx字」，用强调色区分，避免和总字数看混 */
+.count-pill.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+/* 编辑态：胶囊浮在排版栏【外面】的上沿之上 —— 不占那 29px，也不参与按钮的横向滚动。
+   bottom:calc(100% + 4px) 是相对 .ed-dock（position:relative / fixed）算的，
+   所以键盘把栏顶上去时胶囊跟着走，不用任何 JS 补偿。 */
+.count-pill.float {
+  right: max(var(--page-pad), env(safe-area-inset-right));
+  bottom: calc(100% + 4px);
+  margin-bottom: 0;
+  z-index: 3;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .28);
+}
 .ed-inline { display: flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; }
 .ed-inline .input { flex: 1 1 auto; min-width: 0; width: auto; }
 .ed-inline .muted { font-size: calc(var(--font-scale, 1) * 12.5px); white-space: nowrap; }
 
-/* 图片区：大尺寸网格（手机上两列，每格约半屏宽，预览更大更清楚） */
+/* 图片区：大尺寸网格（手机上两列，每格约半屏宽，预览更大更清楚）
+   —— 已回退此前那套「横向大图滑动」的复杂排版，恢复为最初的网格结构。 */
 .media-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .media-grid.empty { grid-template-columns: 1fr; }
 .media-grid.drag .mg-item, .media-grid.drag .mg-add { opacity: .55; }
@@ -895,9 +1156,8 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 .media-drop:active { border-color: var(--accent); }
 .media-drop .md-icon { font-size: calc(var(--font-scale, 1) * 30px); opacity: .85; }
 .media-drop .md-text { font-size: calc(var(--font-scale, 1) * 15px); font-weight: 700; color: var(--text); }
-.media-drop .md-sub { font-size: calc(var(--font-scale, 1) * 12px); }
 .mg-item { position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--border); }
-.mg-item img { width: 100%; height: 100%; object-fit: cover; }
+.mg-item img { width: 100%; height: 100%; object-fit: cover; -webkit-user-drag: none; user-select: none; }
 .mg-item .rm { position: absolute; top: 5px; right: 5px; width: 24px; height: 24px; border-radius: 50%; background: rgba(0,0,0,0.55); color: #fff; display: flex; align-items: center; justify-content: center; font-size: calc(var(--font-scale, 1) * 15px); line-height: 1; }
 .mg-add {
   aspect-ratio: 1; border-radius: 12px; border: 1.5px dashed var(--border); background: var(--surface);
@@ -911,3 +1171,100 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 .comment .c-floor { color: var(--text-dim); font-variant-numeric: tabular-nums; }
 /* 全屏页里日期按钮与「分钟」输入同排：日期按内容宽度，剩余空间给输入框 */
 .ed-form .btn-date { width: auto; flex: 0 0 auto; }
+
+/* ===== 关于页（版本号 / 检查更新 / 使用说明）===== */
+.about-hero { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 26px 16px 22px; }
+.about-logo { font-size: calc(var(--font-scale, 1) * 26px); font-weight: 800; letter-spacing: 2px; }
+.about-ver { font-size: calc(var(--font-scale, 1) * 13.5px); font-weight: 700; color: var(--text-dim); }
+.about-upd { margin-top: 10px; }
+.about-upd-tip { font-size: calc(var(--font-scale, 1) * 12.5px); line-height: 1.6; }
+.about-upd-new { font-weight: 700; font-size: calc(var(--font-scale, 1) * 14px); color: var(--accent); margin-bottom: 6px; }
+.about-upd-note { font-size: calc(var(--font-scale, 1) * 12px); line-height: 1.65; white-space: pre-wrap; max-height: 220px; overflow-y: auto; margin-bottom: 10px; }
+.about-upd-ok { font-weight: 600; font-size: calc(var(--font-scale, 1) * 13px); color: var(--ok); }
+.about-upd-err { font-size: calc(var(--font-scale, 1) * 12.5px); color: var(--danger); line-height: 1.6; }
+.about-doc-card { padding: 16px 16px 18px; }
+.about-doc { white-space: pre-wrap; word-break: break-word; line-height: 1.85; font-size: calc(var(--font-scale, 1) * 13.5px); color: var(--text); }
+
+/* ===== Markdown 富文本（记录正文 / 关于页使用说明）=====
+   这些文字已由 App.md 转成真正的标签，换行交给 <p>/<br> 负责。
+   所以容器必须把原来的 white-space: pre-wrap 关掉，否则源码里的空行会再叠一层。 */
+.md-body { white-space: normal; word-break: break-word; line-height: 1.78; }
+/* 只给「关于→使用说明」用：那页是 md.render 的块级输出、首尾一定是元素，
+   :first-child 才是对的。详情页不能这么收 —— 那里首节点常常是文本节点，
+   `甲<h1>` 时 h1 仍会命中 :first-child，会把「正文→标题」的间距一并抹平。 */
+.about-doc > :first-child { margin-top: 0; }
+.about-doc > :last-child { margin-bottom: 0; }
+.md-body p { margin: 0 0 10px; }
+.md-body h1, .md-body h2, .md-body h3, .md-body h4, .md-body h5, .md-body h6 { margin: 18px 0 8px; line-height: 1.35; font-weight: 800; color: var(--text); }
+.md-body h1 { font-size: calc(var(--font-scale, 1) * 19px); }
+.md-body h2 { font-size: calc(var(--font-scale, 1) * 17px); }
+.md-body h3 { font-size: calc(var(--font-scale, 1) * 15.5px); }
+.md-body h4, .md-body h5, .md-body h6 { font-size: calc(var(--font-scale, 1) * 14.5px); }
+.md-body ul, .md-body ol { margin: 6px 0 10px; padding-left: 22px; }
+.md-body ul { list-style: disc outside; }
+.md-body ol { list-style: decimal outside; }
+.md-body li { margin: 3px 0; }
+.md-body blockquote { margin: 10px 0; padding: 6px 12px; border-left: 3px solid var(--accent); background: var(--surface-2); border-radius: 0 10px 10px 0; color: var(--text-dim); }
+.md-body blockquote p { margin: 0; }
+.md-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; padding: 1px 5px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--border); }
+.md-body pre.md-pre { margin: 10px 0; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); overflow-x: auto; line-height: 1.6; }
+.md-body pre.md-pre code { padding: 0; border: none; background: none; font-size: .9em; white-space: pre; }
+.md-body a { color: var(--accent); text-decoration: underline; }
+.md-body hr { margin: 16px 0; border: none; border-top: 1px solid var(--border); }
+.md-body del { opacity: .72; }
+/* 高亮 ==文字==：走强调色 token，不写死 yellow —— mark 的 UA 默认黄底在深色主题下刺眼，
+   而且和用户自定义的主题强调色完全脱节。 */
+.md-body mark { background: var(--accent-soft); color: var(--text); border-radius: 3px; padding: 0 2px; }
+/* 任务列表 - [ ] / - [x]：方形勾选框用伪元素画，未完成是空心、已完成是实心强调色 + 删除线 */
+.md-body li.md-task-item { list-style: none; position: relative; padding-left: 20px; }
+.md-body li.md-task-item::before {
+  content: ''; position: absolute; left: 0; top: .42em;
+  width: 11px; height: 11px; box-sizing: border-box;
+  border: 1.5px solid var(--text-dim); border-radius: 3px;
+}
+.md-body li.md-task-item.done::before { background: var(--accent); border-color: var(--accent); }
+.md-body li.md-task-item.done { color: var(--text-dim); text-decoration: line-through; }
+/* 详情页正文：取消 pre-wrap，交给 Markdown 结构排版 */
+/* 详情正文容器必须 pre-wrap：配合 mdHtml 逐行 <br> 连接，才能完整保留用户敲的所有换行符（\n）
+   和连续空格——编辑框里敲了几个空行，详情页就原样显示几个空行。 */
+.detail-desc.md-body { white-space: pre-wrap; }
+
+/* ===== 详情页 Markdown 段间距（20261105a）=====
+   mdHtml 现在只在内联行之间插 <br>，块级元素两侧不再多出一整行；
+   于是段间距完全由这里的 margin 决定。全部用 rem —— rem = 16px × 字号档位系数
+   （小 0.875 / 标准 1 / 大 1.15 / 超大 1.3），所以四档字号下间距等比缩放，不会「字大了标题反而更挤」。
+   换算：正文一行 = 1.78rem ≈ 28.4px（标准档），半个空行 ≈ 0.89rem，取 0.875rem。 */
+.detail-desc.md-body h1, .detail-desc.md-body h2, .detail-desc.md-body h3,
+.detail-desc.md-body h4, .detail-desc.md-body h5, .detail-desc.md-body h6 { margin: 0.875rem 0 0.5rem; }
+/* 列表与正文保持一致：上下不留额外间距，行距同正文，只保留 22px 左缩进与圆点/序号 */
+.detail-desc.md-body ul, .detail-desc.md-body ol { margin: 0; }
+.detail-desc.md-body li { margin: 0; }
+.detail-desc.md-body blockquote, .detail-desc.md-body pre.md-pre { margin: 0.625rem 0; }
+.detail-desc.md-body hr { margin: 1rem 0; }
+/* 首块/末块由 mdHtml 打标记（不能用 :first-child，理由见上） */
+.detail-desc.md-body > [data-first] { margin-top: 0; }
+.detail-desc.md-body > [data-last] { margin-bottom: 0; }
+
+/* ===== 全局 Loading 遮罩（图片写入相册期间） ===== */
+/* z-index 高于全屏页(50)/弹窗(50)/看图(95)，低于系统级菜单(130)之外的一切内容，
+   保证「图片处理中」时用户点什么都被挡住，不会误触保存或关闭页面。 */
+.gt-busy { position: fixed; inset: 0; z-index: 150; display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.42); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  animation: gtBusyIn .16s ease; -webkit-tap-highlight-color: transparent; }
+.gt-busy.out { opacity: 0; transition: opacity .16s ease; }
+.gt-busy-box { display: flex; flex-direction: column; align-items: center; gap: 12px; min-width: 156px;
+  padding: 24px 26px; border-radius: var(--radius); background: var(--bg-2);
+  border: 1px solid var(--border); box-shadow: var(--shadow); }
+.gt-busy-spin { width: 30px; height: 30px; border-radius: 50%; box-sizing: border-box;
+  border: 2.6px solid var(--accent-soft); border-top-color: var(--accent);
+  animation: gtSpin .8s linear infinite; }
+.gt-busy-text { font-size: calc(var(--font-scale, 1) * 14px); font-weight: 800; color: var(--text); letter-spacing: .3px; }
+.gt-busy-sub { font-size: calc(var(--font-scale, 1) * 11.5px); color: var(--text-dim); }
+@keyframes gtSpin { to { transform: rotate(360deg); } }
+@keyframes gtBusyIn { from { opacity: 0; } to { opacity: 1; } }
+/* Loading 期间操作区统一不可点（顶栏对勾还会被 JS 显式 disabled） */
+body.is-busy .page-sheet-foot .btn,
+body.is-busy .psh-right .icon-btn,
+body.is-busy .modal-foot .btn { pointer-events: none; opacity: .45; filter: grayscale(.25); }
+.btn[disabled], .btn.is-disabled { opacity: .45; pointer-events: none; box-shadow: none; }
+.btn[disabled]:active, .btn.is-disabled:active { transform: none; }

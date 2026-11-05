@@ -7,12 +7,13 @@ App.app = (function () {
 
   // ===== 跟随系统 =====
   // 系统深浅变了 → 只有外观模式为「跟随系统」时才重新解析并落地主题。
-  function applySystemThemeIfAuto() {
+  // darkOverride：事件（媒体查询）已经拿到新值时直接传进来，省一次探测、也不会被旧值覆盖。
+  function applySystemThemeIfAuto(darkOverride) {
     // 存储尚未就绪（首次启动、db 异常）时直接跳过，避免轮询把异常抛到控制台
     const s = (App.state && App.state.data && App.state.data.settings) || null;
     if (!s) return false;
     if ((s.appearance || 'auto') !== 'auto') return false;
-    App.themes.applyFromSettings(s);
+    App.themes.applyFromSettings(s, darkOverride);
     syncStatusBar();
     return true;
   }
@@ -20,20 +21,21 @@ App.app = (function () {
   function bindSystemTheme() {
     if (systemBound) return;
     systemBound = true;
-    lastSystemDark = App.themes.systemIsDark();
+    lastSystemDark = App.themes.systemIsDark(true);
 
     // 统一的一次「复查」：系统深浅变了才重新落地主题，没变立刻返回（轮询/事件共用）
-    function checkNow(force) {
-      const now = App.themes.systemIsDark();
+    // force=true 同时意味着「绕过主题模块的探测缓存」，plusready 首次校准必须用它
+    function checkNow(force, override) {
+      const now = (typeof override === 'boolean') ? override : App.themes.systemIsDark(force);
       if (!force && now === lastSystemDark) return;
       lastSystemDark = now;
-      applySystemThemeIfAuto();
+      applySystemThemeIfAuto(now);
     }
 
     // ① 标准做法：媒体查询 change 事件（桌面浏览器、较新的 WebView 都会派发）
     try {
       const mq = window.matchMedia('(prefers-color-scheme: dark)');
-      const onChange = () => { checkNow(false); };
+      const onChange = (e) => { checkNow(true, e && typeof e.matches === 'boolean' ? e.matches : undefined); };
       if (mq.addEventListener) mq.addEventListener('change', onChange);
       else if (mq.addListener) mq.addListener(onChange);
     } catch (e) {}
@@ -50,6 +52,9 @@ App.app = (function () {
       }, false);
       // 5+ 从后台恢复（真机上页面可能并未触发 visibilitychange）
       document.addEventListener('resume', () => { checkNow(false); syncStatusBar(); }, false);
+      // 窗口重新获得焦点（切回来 / 从系统设置返回）也立刻复查一次
+      window.addEventListener('focus', () => checkNow(false), false);
+      window.addEventListener('pageshow', () => checkNow(false), false);
     }
     // ④ 5+ 环境：plus 注入后才能拿到 getUIStyle / 设置状态栏，plusready 时校准一次
     if (!systemPlusBound) {
@@ -147,6 +152,7 @@ App.app = (function () {
   document.addEventListener('plusready', () => {
     if (pendingBar) pushStatusBar(pendingBar.hex, pendingBar.style);
     else syncStatusBar();
+    applySafeTop();   // 状态栏就绪后才能判断是不是沉浸式
   }, false);
 
   function applyFontScale() {
@@ -156,7 +162,74 @@ App.app = (function () {
     document.documentElement.style.setProperty('--font-scale', String(v));
   }
 
+  // ===== 顶部安全区（修掉「GoJo 标题上方多出一大块空白」）=====
+  // 顶栏原来的 padding-top 直接用了 env(safe-area-inset-top)。可很多安卓机（尤其
+  // 非刘海屏 + 非沉浸式状态栏）里这个值仍然会给出状态栏高度，而 WebView 本身已经
+  // 在状态栏下方了 —— 于是顶栏上方被顶出一整行空白。
+  // 现在直接问原生：状态栏非沉浸式 → 就是 0；沉浸式 → 取状态栏真实高度。
+  // 拿不到原生 API 时（浏览器预览）保持 CSS 的 env() 兜底，行为不变。
+  function applySafeTop() {
+    const root = document.documentElement;
+    let px = -1;
+    try {
+      const plus = window.plus;
+      if (plus && plus.navigator && typeof plus.navigator.isImmersedStatusbar === 'function') {
+        let immersed = false;
+        try { immersed = !!plus.navigator.isImmersedStatusbar(); } catch (e) { immersed = false; }
+        if (immersed) {
+          px = 0;
+          try { if (typeof plus.navigator.getStatusbarHeight === 'function') px = Number(plus.navigator.getStatusbarHeight()) || 0; } catch (e) {}
+        } else {
+          px = 0;
+        }
+      }
+    } catch (e) { px = -1; }
+    if (px < 0) root.style.removeProperty('--safe-top');
+    else root.style.setProperty('--safe-top', Math.max(0, Math.round(px)) + 'px');
+  }
+
+  // 启动兜底：任何异常、或本地数据库迟迟没有响应，都在启动画面上直接说明原因，
+  // 绝不再无限停在「正在加载…」让人摸不着头脑（浏览器禁用 IndexedDB / 用 file:// 直接
+  // 双击打开 index.html 时最容易出现）。
+  let bootWatch = null;
   async function boot() {
+    try {
+      await bootInner();
+    } catch (e) {
+      showBootFail(e);
+    }
+    if (bootWatch) clearTimeout(bootWatch);
+    bootWatch = setTimeout(() => {
+      if (document.getElementById('boot')) showBootFail(new Error('本地数据库没有响应'));
+    }, 6000);
+  }
+
+  function showBootFail(e) {
+    const box = document.getElementById('boot');
+    if (!box) return;
+    const msg = (e && (e.message || e.reason || e)) ? String(e.message || e) : '未知错误';
+    const isFile = String(location.protocol || '') === 'file:';
+    const sub = box.querySelector('.boot-sub');
+    if (sub) sub.textContent = '启动失败：' + msg;
+    if (box.querySelector('.boot-fail')) return;
+    const hint = U().el('div', {
+      class: 'boot-fail',
+      style: { marginTop: '10px', maxWidth: '300px', textAlign: 'center', fontSize: '12px', lineHeight: '1.7', color: '#9aa3af' },
+      text: isFile
+        ? '当前是用 file:// 直接打开的，浏览器会禁用本地数据库。请改用本地服务器地址打开（例如 http://localhost:5173/）。'
+        : '本地存储不可用或响应超时。请确认浏览器没有禁用站点数据，然后重试。',
+    });
+    const retry = U().el('button', {
+      class: 'btn primary',
+      style: { marginTop: '12px' },
+      text: '重试',
+    });
+    retry.addEventListener('click', () => location.reload());
+    box.appendChild(hint);
+    box.appendChild(retry);
+  }
+
+  async function bootInner() {
     appEl = document.getElementById('app');
     // 申请持久化存储权限（不 await，失败/不支持也不影响启动）
     if (App.storage && App.storage.ensurePersisted) App.storage.ensurePersisted();
@@ -164,16 +237,29 @@ App.app = (function () {
     const s = App.state.data.settings;
     App.themes.applyFromSettings(s);
     applyFontScale();
+    applySafeTop();
     syncStatusBar();
     // 引导页也要跟随系统切深浅色，所以在分支之前先绑好监听
     bindSystemTheme();
     U().clear(appEl);
     if (!App.state.data.setupDone) { App.setup.render(appEl); return; }
     renderShell();
+    applySafeTop();
     syncStatusBar();   // 顶栏此时才存在，重新取它的真实底色对齐状态栏
     renderRoute();
     initBackKey();
     initSwipe();
+    // 老版本把图片存在 IndexedDB 里：进 App 3 秒后后台分批搬进相册 Pictures/GoJo，
+    // 不阻塞界面、失败也不影响任何功能（原 Blob 保留）。
+    try { setTimeout(() => { if (App.storage.migrateBlobsToAlbum) App.storage.migrateBlobsToAlbum(12).catch(() => {}); }, 3000); } catch (e) {}
+    // 相册清道夫：老版本把封面小图也写进了 Pictures/GoJo，同一张照片会出现两遍。
+    // 启动 6 秒后在后台扫一次，只删 GoJo 目录里宽度 < 400px 的图（记录还在引用的不删）。
+    // 相册清道夫 + 反向对账 + 安全上限自动清理：启动 6 秒后一并后台跑（仅启动时，不阻塞首屏）。
+    try { setTimeout(() => {
+      if (App.storage.cleanAlbumJunk) App.storage.cleanAlbumJunk().catch(() => {});
+      if (App.storage.reconcileAlbumMissing) App.storage.reconcileAlbumMissing().catch(() => {});
+      if (App.storage.maybeAutoClean) App.storage.maybeAutoClean().catch(() => {});
+    }, 6000); } catch (e) {}
   }
 
   function navItem(key, label, iconName) {
@@ -372,7 +458,9 @@ App.app = (function () {
 
       if (!cancelled && (far || fast)) {
         view.style.transition = 'transform .2s cubic-bezier(.4,0,.72,1), opacity .2s';
-        view.style.transform = 'translate3d(' + (gg.dir * 100) + '%,0,0)';
+        // 离场方向 = 手指方向：左滑(dir=+1) 当前页继续往左飞出，右滑(dir=-1) 往右飞出。
+        // 新页在 applyRouteEnter 里从 dir*18%（即手指来向的反侧）滑进来，两边衔接才顺。
+        view.style.transform = 'translate3d(' + (-gg.dir * 100) + '%,0,0)';
         view.style.opacity = '0';
         pendingEnter = { dir: gg.dir };
         // setTimeout 兜底，不依赖 transitionend，绝不会卡在半截

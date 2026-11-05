@@ -59,6 +59,19 @@ App.ui = (function () {
     target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
     grid: '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/>',
     single: '<rect x="4" y="3" width="16" height="18" rx="2.6"/><path d="M4 13.5l3.6-3.2 3.4 3 2.8-2.4 5.2 4.6"/><circle cx="9" cy="8" r="1.5"/>',
+    // —— 编辑页 Markdown 工具栏（撤销/重做 + 行内与块级记号）——
+    mdUndo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h9.5a5.5 5.5 0 0 1 0 11H11"/>',
+    mdRedo: '<path d="M15 14l5-5-5-5"/><path d="M20 9h-9.5a5.5 5.5 0 0 0 0 11H13"/>',
+    mdBold: '<path d="M7 4h6.2a3.9 3.9 0 0 1 0 7.8H7z"/><path d="M7 11.8h7a4.1 4.1 0 0 1 0 8.2H7z"/>',
+    mdItalic: '<path d="M17 4h-6M13 20H7M15 4l-4 16"/>',
+    mdStrike: '<path d="M4 12h16"/><path d="M8 7.6A3.6 3.6 0 0 1 11.6 4h1.4A3.4 3.4 0 0 1 16.4 7.4"/><path d="M16.2 16.2A3.6 3.6 0 0 1 12.6 20h-1.4a3.6 3.6 0 0 1-3.4-2.4"/>',
+    mdMark: '<path d="M9 11.6l-5.4 5.4v3h3l5.4-5.4"/><path d="M21.4 12l-4.3 4.3a1.9 1.9 0 0 1-2.7 0l-4.7-4.7a1.9 1.9 0 0 1 0-2.7L14 4.6z"/>',
+    mdOl: '<path d="M10 6h11M10 12h11M10 18h11"/><path d="M4 5.2h1v4.3"/><path d="M3.6 12.6c0-.7.6-1.3 1.3-1.3s1.3.5 1.3 1.2c0 1.2-2.6 1.6-2.6 3.1h2.8"/>',
+    mdUl: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.3" fill="currentColor" stroke="none"/>',
+    mdTask: '<rect x="2.8" y="3.4" width="5.2" height="5.2" rx="1.2"/><path d="M4.2 6l1.1 1.1 1.9-2.1"/><path d="M11.5 6h9.5M11.5 12h9.5M11.5 18h9.5"/><path d="M4.2 12h1.6M4.2 18h1.6"/>',
+    mdQuote: '<path d="M5 4v16"/><path d="M10 7h9M10 12h9M10 17h6"/>',
+    mdCode: '<path d="M16 18l6-6-6-6"/><path d="M8 6l-6 6 6 6"/>',
+    mdLink: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
   };
   function icon(name, size) {
     const s = size || 24;
@@ -73,6 +86,43 @@ App.ui = (function () {
     const t = el('div', { class: 'toast' + (type ? ' ' + type : ''), text: msg });
     root.appendChild(t);
     setTimeout(() => { t.style.transition = 'opacity .25s'; t.style.opacity = '0'; setTimeout(() => t.remove(), 260); }, 2200);
+  }
+
+  // —— 全局 Loading（图片处理中…）——
+  // 写相册（3MB 图约 1~3 秒）这种「没法预估时长、期间绝不能重复提交」的操作专用：
+  //   · 遮罩铺满全屏，吃掉所有点击（含拖拽、滑动），避免用户以为卡死而乱点；
+  //   · body 挂 is-busy，底部操作按钮统一变灰不可点（保存按钮另外显式 disabled）；
+  //   · 计数式开关：图片任务里可能嵌套调用，谁最后关谁才真正撤掉遮罩。
+  let busyLayer = null;
+  let busyTextEl = null;
+  let busyDepth = 0;
+  function isBusy() { return busyDepth > 0; }
+  function setBusyText(text) {
+    if (busyTextEl && text) { busyTextEl.textContent = text; return true; }
+    return false;
+  }
+  function showBusy(text) {
+    busyDepth++;
+    const msg = text || '图片处理中...';
+    if (busyLayer) { setBusyText(msg); return; }
+    busyTextEl = el('div', { class: 'gt-busy-text', text: msg });
+    busyLayer = el('div', { class: 'gt-busy' },
+      el('div', { class: 'gt-busy-box' },
+        el('div', { class: 'gt-busy-spin' }),
+        busyTextEl,
+        el('div', { class: 'gt-busy-sub', text: '请稍候，不要离开当前页面' })));
+    document.body.appendChild(busyLayer);
+    document.body.classList.add('is-busy');
+  }
+  function hideBusy() {
+    if (busyDepth > 0) busyDepth--;
+    if (busyDepth > 0) return;               // 还有别处占着，先不撤
+    document.body.classList.remove('is-busy');
+    const l = busyLayer;
+    busyLayer = null; busyTextEl = null;
+    if (!l) return;
+    l.classList.add('out');
+    setTimeout(() => { try { l.remove(); } catch (e) {} }, 180);
   }
 
   // —— 弹窗 ——
@@ -113,14 +163,17 @@ App.ui = (function () {
   // —— 全屏页 ——
   // 与 modal 共用同一个关闭栈（返回键先关最上层），但占满整屏、内容区独立滚动、
   // 底部操作按钮固定 —— 新建/编辑记录这类长表单用它，不再挤在弹窗里。
-  function fullPage({ title, body, actions, onClose }) {
+  function fullPage({ title, body, actions, onClose, right }) {
     const root = document.getElementById('modal-root');
     const wrap = el('div', { class: 'page-sheet' });
     const backBtn = el('button', { class: 'icon-btn page-sheet-back', html: icon('x', 22), title: '关闭' });
+    // 右上角操作区：编辑页把「保存」对勾放这里（与左上角的叉同尺寸、同色，左右对称）。
+    // 宽度必须 <= .psh-side 的 40px，否则会往左溢出压住标题。
+    const rightWrap = el('div', { class: 'psh-side psh-right' });
     const head = el('div', { class: 'page-sheet-head' },
       el('div', { class: 'psh-side psh-left' }, backBtn),
       el('h3', { class: 'psh-title', text: title || '' }),
-      el('div', { class: 'psh-side psh-right' }));
+      rightWrap);
     const bodyWrap = el('div', { class: 'page-sheet-body' });
     if (typeof body === 'string') bodyWrap.appendChild(el('div', { html: body }));
     else if (body) bodyWrap.appendChild(body);
@@ -131,18 +184,24 @@ App.ui = (function () {
       wrap.remove();
       if (onClose) onClose();
     }
+    // 把每个操作按钮的引用一起返回：调用方（如编辑页）需要在「图片写入中」把保存按钮置灰禁用
+    const buttons = [];
     (actions || []).forEach((a) => {
       const b = el('button', { class: 'btn' + (a.primary ? ' primary' : '') + (a.danger ? ' danger' : ''), text: a.label });
       b.addEventListener('click', () => { if (a.onClick) a.onClick(close); else close(); });
       foot.appendChild(b);
+      buttons.push({ label: a.label, el: b });
     });
     backBtn.addEventListener('click', close);
+    // right：单个节点或节点数组，都塞进右上角
+    const rights = right ? (Array.isArray(right) ? right : [right]) : [];
+    rights.forEach((n) => { if (n) rightWrap.appendChild(n); });
     wrap.appendChild(head);
     wrap.appendChild(bodyWrap);
     if (actions && actions.length) wrap.appendChild(foot);
     modalStack.push(close);
     root.appendChild(wrap);
-    return { close, el: wrap, body: bodyWrap };
+    return { close, el: wrap, body: bodyWrap, buttons, rightWrap };
   }
 
   // —— 统一的「+n 数值」居中弹窗（仪表盘 / 目标页共用，UI 完全一致）——
@@ -183,76 +242,9 @@ App.ui = (function () {
     });
   }
 
-  // —— 缩略图生成（同时产出压缩原图 + 3:4 竖版封面缩略图）——
-  function canvasToBlob(canvas, type, q) { return new Promise((res) => canvas.toBlob((b) => res(b), type, q)); }
-
-  /* 画质要点（旧实现“马赛克”的两个根因）：
-     ① canvas 2d 的 imageSmoothingQuality 默认是 low，把一张 4000px 的手机照片
-        一步 drawImage 到 400px，采样不足 → 出现锯齿 + 摩尔纹，看起来就是马赛克；
-     ② 缩略图长边只有 400px，而卡片封面在 3x 屏上要 500~1000 物理像素，
-        于是又被二次放大 → 糊成一片。
-     解决：ctx 一律 high 质量 + 渐进式减半缩放（每次 ≤1/2，避免一次跨度过大失真），
-     缩略图直接按卡片比例（3:4）居中裁切并生成 720×960，卡片里 1:1 呈现不再缩放。 */
-  const COVER_W = 900, COVER_H = 1200;
-  function ctx2d(c) { const x = c.getContext('2d'); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high'; return x; }
-  function resample(src, sx, sy, sw, sh, tw, th) {
-    let cur = src, cx = sx, cy = sy, cw = sw, ch = sh;
-    while (cw >= tw * 2 && ch >= th * 2) {
-      const half = document.createElement('canvas');
-      half.width = Math.round(cw / 2); half.height = Math.round(ch / 2);
-      ctx2d(half).drawImage(cur, cx, cy, cw, ch, 0, 0, half.width, half.height);
-      cur = half; cx = 0; cy = 0; cw = half.width; ch = half.height;
-    }
-    const out = document.createElement('canvas'); out.width = tw; out.height = th;
-    ctx2d(out).drawImage(cur, cx, cy, cw, ch, 0, 0, tw, th);
-    return out;
-  }
-  // 按 3:4 居中裁切（object-fit: cover 的效果，但在压缩阶段就裁好，画质损失最小）
-  function coverCanvas(img, tw, th) {
-    const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
-    const ir = iw / ih, tr = tw / th;
-    let sw, sh, sx, sy;
-    if (ir > tr) { sh = ih; sw = Math.round(sh * tr); sx = Math.round((iw - sw) / 2); sy = 0; }
-    else { sw = iw; sh = Math.round(sw / tr); sx = 0; sy = Math.round((ih - sh) / 2); }
-    return resample(img, sx, sy, sw, sh, tw, th);
-  }
-  // 由 Blob 生成封面缩略图（旧数据后台补清晰时复用）
-  function makeCoverBlob(blob) {
-    return new Promise((resolve, reject) => {
-      const url = URL.createObjectURL(blob);
-      const img = new Image();
-      img.onload = () => {
-        try { canvasToBlob(coverCanvas(img, COVER_W, COVER_H), 'image/jpeg', 0.84).then(resolve).catch(reject); }
-        catch (e) { reject(e); } finally { URL.revokeObjectURL(url); }
-      };
-      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片读取失败')); };
-      img.src = url;
-    });
-  }
-  function makeThumb(file, maxFull) {
-    maxFull = maxFull || 2048;
-    return new Promise((resolve, reject) => {
-      const url = URL.createObjectURL(file);
-      const img = new Image();
-      img.onload = () => {
-        try {
-          const w = img.naturalWidth, h = img.naturalHeight;
-          function dims(max) { const m = Math.max(w, h); if (m <= max) return { w: w, h: h }; const s = max / m; return { w: Math.round(w * s), h: Math.round(h * s) }; }
-          const fd = dims(maxFull);
-          const isPng = file.type === 'image/png';
-          const fullType = isPng ? 'image/png' : 'image/jpeg';
-          Promise.all([
-            canvasToBlob(resample(img, 0, 0, w, h, fd.w, fd.h), fullType, isPng ? 0.95 : 0.84),
-            canvasToBlob(coverCanvas(img, COVER_W, COVER_H), 'image/jpeg', 0.84),
-          ]).then(([full, thumb]) => {
-            resolve({ blob: full, thumbBlob: thumb, thumbW: COVER_W, thumbH: COVER_H, name: file.name, type: fullType, size: full.size });
-          }).catch(reject);
-        } catch (e) { reject(e); } finally { URL.revokeObjectURL(url); }
-      };
-      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片读取失败')); };
-      img.src = url;
-    });
-  }
+  // —— 缩略图生成已彻底移除 ——
+  // 相册里只存高清原图；列表 / 卡片直接用原图，由 CSS 等比缩放展示。
+  // 这样上传时不再多一次 canvas 解码与编码，也不会在相册里多出一张模糊小图。
 
   // —— 格式化 ——
   function fmtMoney(n) { n = Number(n) || 0; return '¥' + n.toFixed(n % 1 ? 2 : 0); }
@@ -854,8 +846,8 @@ App.ui = (function () {
   }
 
   return {
-    el, clear, mount, icon, iconEl, toast, modal, fullPage, confirmDialog, promptNumber, makeThumb, makeCoverBlob,
-    COVER_W, COVER_H,
+    el, clear, mount, icon, iconEl, toast, modal, fullPage, confirmDialog, promptNumber,
+    showBusy, hideBusy, isBusy, setBusyText,
     makeSelect, closeSelMenu, openCalendar, openColorPicker, closeColorPicker, openImageViewer,
     closeImageViewer, isImageViewerOpen, closeTopLayer,
     fmtMoney, fmtDate, fmtDateTime, monthKey, quickAddCategory, quickAddTag,

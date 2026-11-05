@@ -348,19 +348,21 @@ App.exim = (function () {
     records.forEach((r) => (r.imageIds || []).forEach((id) => imageIds.push(id)));
     const zip = new JSZip();
     const imageList = [];
+    let missing = 0;
     for (const id of imageIds) {
-      // 只打包原图：缩略图体积与一张「压缩原图」相当，带进备份包等于把体积翻倍，
-      // 导入时会按原图重新生成（rebuildThumb），所以这里读都不用读。
+      // 只打包原图：列表直接用原图展示，不再需要额外的小图文件。
+      // 原图存在手机相册 Pictures/GoJo 里；文件被用户删掉时读不到，直接跳过并计数。
       const ex = await App.storage.readImageForExport(id, false);
-      if (!ex) continue;
+      if (!ex || !ex.full) { missing++; continue; }
       const ext = extOf(ex.type, ex.name);
       imageList.push({ id, name: ex.name, type: ex.type, ext });
-      if (ex.full) zip.file('images/' + id + '.' + ext, ex.full);
+      zip.file('images/' + id + '.' + ext, ex.full);
     }
     const data = { version: 2, exportedAt: App.storage.now(), app: 'growth-tracker', domains, records, settings, imageList };
     zip.file('data.json', JSON.stringify(data));
     const b64 = await zip.generateAsync({ type: 'base64', compression: 'DEFLATE', compressionOptions: { level: 6 } });
     await finishExport(b64, 'gojo-backup-' + stamp() + '.gtbackup');
+    if (missing) U().toast('有 ' + missing + ' 张原图已丢失（相册里被删了），未打包', 'err');
   }
 
   // 导出单个领域（ZIP：图片存原文件，JSON 只存元数据，绝不含 base64）
@@ -374,17 +376,19 @@ App.exim = (function () {
     records.forEach((r) => (r.imageIds || []).forEach((id) => imageIds.push(id)));
     const zip = new JSZip();
     const imageList = [];
+    let missing = 0;
     for (const id of imageIds) {
       const ex = await App.storage.readImageForExport(id, false);
-      if (!ex) continue;
+      if (!ex || !ex.full) { missing++; continue; }
       const ext = extOf(ex.type, ex.name);
       imageList.push({ id, name: ex.name, type: ex.type, ext });
-      if (ex.full) zip.file('images/' + id + '.' + ext, ex.full);
+      zip.file('images/' + id + '.' + ext, ex.full);
     }
     const data = { version: 2, exportedAt: App.storage.now(), app: 'growth-tracker', scope: 'domain', domains: [domain], records, imageList, settings: { customThemes: App.state.data.settings.customThemes || [] } };
     zip.file('data.json', JSON.stringify(data));
     const b64 = await zip.generateAsync({ type: 'base64', compression: 'DEFLATE', compressionOptions: { level: 6 } });
     await finishExport(b64, 'gojo-' + domain.name + '-' + stamp() + '.gtbackup');
+    if (missing) U().toast('有 ' + missing + ' 张原图已丢失（相册里被删了），未打包', 'err');
   }
 
   function pickMode() {
@@ -401,15 +405,7 @@ App.exim = (function () {
     });
   }
 
-  // —— 导入时重建缩略图 ——
-  // 新备份包（version 2 起）不再带 images/thumb/，这里按原图现场裁出 3:4 封面图。
-  // 老备份包如果自带 thumb 就直接用，省一次解码；重建失败也不影响导入（列表会回退读原图）。
-  function canRebuild() { return !!(App.ui && typeof App.ui.makeCoverBlob === 'function'); }
-  async function rebuildThumb(fullBlob) {
-    if (!canRebuild() || !fullBlob || !fullBlob.size) return null;
-    if (fullBlob.size > 24 * 1024 * 1024) return null; // 超大原图跳过，避免解码时内存爆掉
-    try { return await App.ui.makeCoverBlob(fullBlob); } catch (e) { return null; }
-  }
+  // 缩略图已废弃：备份包只装原图，导入时也不生成任何小图。
 
   // —— 导入前统一格式 ——
   // 备份文件可能是：① 真正的 ZIP（PK\x03\x04 开头，二进制写入成功时的产物）；
@@ -470,10 +466,6 @@ App.exim = (function () {
     names.sort((a, b) => a.length - b.length);
     return zip.file(names[0]);
   }
-  function findThumb(zip, baseName) {
-    const n = Object.keys(zip.files).find((x) => !zip.files[x].dir && /(^|\/)thumb\//.test(x) && x.split('/').pop() === baseName);
-    return n ? zip.file(n) : null;
-  }
 
   async function importAll(file, prefMode) {
     let mode = prefMode || await pickMode();
@@ -489,11 +481,14 @@ App.exim = (function () {
         throw new Error('data.json 不是本应用的数据结构');
       }
       if (mode === 'replace') {
+        // 覆盖恢复前先把旧图片从相册删掉（只删 Pictures/GoJo 内的），否则会留下无主原图
+        try {
+          const olds = (await App.storage.getAll('images')) || [];
+          await App.storage.deleteImages(olds.map((x) => x.id));
+        } catch (e) {}
         await App.storage.clear('kv'); await App.storage.clear('domains'); await App.storage.clear('records'); await App.storage.clear('images');
       }
-      // 图片（存为文件，不进 JSON）；缩略图缺失时用原图重建
-      const thumbW = (App.ui && App.ui.COVER_W) || 900;
-      const thumbH = (App.ui && App.ui.COVER_H) || 1200;
+      // 图片：只导入原图（新版本不再有缩略图，列表直接用原图）
       const imgList = data.imageList || [];
       let done = 0;
       for (const im of imgList) {
@@ -501,21 +496,12 @@ App.exim = (function () {
         const fullF = zip.file('images/' + base) || findEntry(zip, base);
         if (!fullF) continue;
         const fullBlob = new Blob([await fullF.async('arraybuffer')], { type: im.type || 'image/jpeg' });
-        const thumbF = findThumb(zip, base);
-        let thumbBlob = null, tw = 0, th = 0;
-        if (thumbF) {
-          thumbBlob = new Blob([await thumbF.async('arraybuffer')], { type: 'image/jpeg' });
-          tw = im.thumbW || thumbW; th = im.thumbH || thumbH;
-        } else {
-          thumbBlob = await rebuildThumb(fullBlob);
-          if (thumbBlob) { tw = thumbW; th = thumbH; }
-        }
         await App.storage.saveImage({
           id: im.id, name: im.name || ('img.' + im.ext), type: im.type || 'image/jpeg',
-          size: fullBlob.size, blob: fullBlob, thumbBlob: thumbBlob, thumbW: tw, thumbH: th,
+          size: fullBlob.size, blob: fullBlob,
         });
         done++;
-        if (imgList.length > 3 && done % 3 === 0) U().toast('正在重建缩略图 ' + done + '/' + imgList.length + '…');
+        if (imgList.length > 3 && done % 3 === 0) U().toast('正在导入图片 ' + done + '/' + imgList.length + '…');
         await new Promise((r) => setTimeout(r, 0)); // 让出主线程，避免大包导入时界面假死
       }
       // 自定义主题：合并（按 key 去重，避免覆盖现有）

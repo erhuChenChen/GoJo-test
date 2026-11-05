@@ -55,6 +55,10 @@ body {
 }
 
 button, input, textarea, select { font-family: inherit; color: inherit; }
+/* 全局 textarea 兜底：行高必须用【固定长度 px】（不能 normal、不能用倍数），
+   并关闭 text-size-adjust——这是安卓 WebView（5+ App 内核）特有的「回车空两行」行高 Bug
+   （Chromium font-boosting，Bug 84186）的唯一可靠解法。类选择器 .ed-desc/.textarea 会覆盖同值。 */
+textarea { line-height: 1.4em; -webkit-text-size-adjust: none; text-size-adjust: none; }
 button { cursor: pointer; border: none; background: none; }
 a { color: var(--accent); text-decoration: none; }
 img { display: block; max-width: 100%; }
@@ -114,7 +118,7 @@ body::before {
   min-height: var(--header-h);
   display: flex; align-items: center; gap: 10px;
   box-sizing: border-box;
-  padding-top: max(env(safe-area-inset-top, 0px), 0px);
+  padding-top: var(--safe-top, env(safe-area-inset-top, 0px));
   padding-bottom: 2px;
   padding-left: max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right));
   padding-right: max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right));
