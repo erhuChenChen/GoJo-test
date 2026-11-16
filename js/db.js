@@ -32,6 +32,23 @@ App.db = (function () {
   }
   async function getRecord(id) { return S().get('records', id); }
   async function saveRecord(r) { return S().put('records', r); }
+
+  // 局部更新：读-改-写，只覆盖 patch 里给出的字段。
+  // 计时器 / 步骤这类「旁路写入」必须走它 —— 直接 saveRecord(内存里的旧副本) 会把
+  // 编辑器里尚未保存的标题、正文、图片一起写回旧值。
+  // patch 可以是对象，也可以是 (cur) => delta 的函数（需要在最新数据上算的时候用）。
+  async function patchRecord(id, patch) {
+    const cur = await S().get('records', id);
+    if (!cur) return null;
+    const delta = (typeof patch === 'function') ? (patch(cur) || {}) : (patch || {});
+    const next = Object.assign({}, cur, delta, { updatedAt: S().now() });
+    await S().put('records', next);
+    // 内存副本同步：state.data.records 是列表 / 详情页的读取源，不同步会读到旧值
+    const mem = (App.state && App.state.data && App.state.data.records) || [];
+    const hit = mem.find((r) => r.id === id);
+    if (hit) Object.assign(hit, next);
+    return next;
+  }
   async function deleteRecord(id) {
     const r = await S().get('records', id); if (!r) return;
     if (r.imageIds && r.imageIds.length) await S().deleteImages(r.imageIds);
@@ -63,5 +80,5 @@ App.db = (function () {
     return { moved };
   }
 
-  return { getKV, setKV, getDomains, getDomain, saveDomain, deleteDomain, getRecords, getRecord, saveRecord, deleteRecord, moveRecordsToDomain };
+  return { getKV, setKV, getDomains, getDomain, saveDomain, deleteDomain, getRecords, getRecord, saveRecord, patchRecord, deleteRecord, moveRecordsToDomain };
 })();

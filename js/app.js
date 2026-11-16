@@ -249,6 +249,11 @@ App.app = (function () {
     renderRoute();
     initBackKey();
     initSwipe();
+    // 计时收口：上次被系统杀掉时可能留下「未结束」的计时段（end 为 null）。
+    // 启动时按心跳把它们的 end 补上，否则会凭空多出几十小时（见 js/timer.js）。
+    if (App.timer && App.timer.init) App.timer.init().catch(() => {});
+    // 计时小窗的全局订阅：装一次就够，之后不论在哪个页面、计时是否在跑，它自己挂/收
+    try { if (App.records && App.records.initTimerWin) App.records.initTimerWin(); } catch (e) {}
     // 老版本把图片存在 IndexedDB 里：进 App 3 秒后后台分批搬进相册 Pictures/GoJo，
     // 不阻塞界面、失败也不影响任何功能（原 Blob 保留）。
     try { setTimeout(() => { if (App.storage.migrateBlobsToAlbum) App.storage.migrateBlobsToAlbum(12).catch(() => {}); }, 3000); } catch (e) {}
@@ -308,8 +313,32 @@ App.app = (function () {
 
   function currentBase() { const h = (location.hash || '').replace('#/', '').split('/')[0]; return h || 'dashboard'; }
   function go(route) { location.hash = '#/' + route; }
-  function renderRoute() {
+
+  // ===== 就地重绘时保住滚动位置 =====
+  // 场景：在详情页上开编辑页，点 × 关掉后要重绘详情（否则看到的是旧数据）。
+  // 但整页重建会把 scrollTop 打回顶部 —— 用户明明只是关了个页面，凭什么回到顶上。
+  // 图片是异步解码的，高度要过一会儿才正确，所以这里补钉四次而不是只设一次。
+  let scrollGen = 0;   // 代次：新的重绘 / 路由跳转一来，旧的补钉定时器立刻失效
+  function restoreScroll(y, hashAt) {
+    const gen = ++scrollGen;
+    const put = () => {
+      if (gen !== scrollGen) return;
+      if ((location.hash || '') !== hashAt) return;      // 用户已经跳到别的路由了，别拉回去
+      try {
+        const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+        window.scrollTo(0, Math.min(y, max));
+      } catch (_) { /* 极老内核 / 无头环境没有 scrollTo，忽略即可 */ }
+    };
+    put(); setTimeout(put, 80); setTimeout(put, 320); setTimeout(put, 700);
+  }
+
+  function renderRoute(opts) {
+    // opts 只在代码里显式调用时传；hashchange 事件对象里的 keepScroll 是 undefined，天然安全。
+    const keepScroll = !!(opts && opts.keepScroll);
+    const hashAt = location.hash || '';
+    const y0 = keepScroll ? (window.pageYOffset || document.documentElement.scrollTop || 0) : 0;
     const h = (location.hash || '').replace('#/', '');
+    // 计时小窗不再随路由销毁：它在计时期间要跨页面一直可见（全局订阅见 App.records.initTimerWin）
     const parts = h.split('/');
     const base = parts[0] || 'dashboard';
     if (navItems) Object.keys(navItems).forEach((k) => navItems[k].classList.toggle('active', k === base));
@@ -318,7 +347,8 @@ App.app = (function () {
     else if (base === 'record') App.records.renderDetail(view, parts[1]);
     else if (base === 'settings') App.settings.render(view);
     else App.dashboard.render(view);
-    window.scrollTo(0, 0);
+    if (keepScroll) restoreScroll(y0, hashAt);
+    else window.scrollTo(0, 0);
     applyRouteEnter();  // 翻页入场 / 清理滑动残留
     ensureBackTrap();   // 路由换完立刻补哨兵，下一次返回才不会直接退到上一条路由
   }

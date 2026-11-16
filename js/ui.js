@@ -30,6 +30,9 @@ App.ui = (function () {
     records: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/>',
     settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
+    play: '<path d="M8 5l11 7-11 7z"/>',
+    pause: '<path d="M9 5v14M15 5v14"/>',
+    stop: '<rect x="7" y="7" width="10" height="10" rx="1.5"/>',
     x: '<path d="M18 6L6 18M6 6l12 12"/>',
     trash: '<path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V6"/><path d="M10 11v6M14 11v6"/>',
     edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>',
@@ -163,7 +166,7 @@ App.ui = (function () {
   // —— 全屏页 ——
   // 与 modal 共用同一个关闭栈（返回键先关最上层），但占满整屏、内容区独立滚动、
   // 底部操作按钮固定 —— 新建/编辑记录这类长表单用它，不再挤在弹窗里。
-  function fullPage({ title, body, actions, onClose, right }) {
+  function fullPage({ title, body, actions, onClose, right, onBack }) {
     const root = document.getElementById('modal-root');
     const wrap = el('div', { class: 'page-sheet' });
     const backBtn = el('button', { class: 'icon-btn page-sheet-back', html: icon('x', 22), title: '关闭' });
@@ -199,6 +202,9 @@ App.ui = (function () {
     wrap.appendChild(head);
     wrap.appendChild(bodyWrap);
     if (actions && actions.length) wrap.appendChild(foot);
+    // onBack：让页面在被「关闭」之前先自己消费一次返回键（编辑页用它实现
+    // 「非正文视图时先回正文视图」）。返回 true = 这一下已消费，不要关页面。
+    if (typeof onBack === 'function') close.onBack = onBack;
     modalStack.push(close);
     root.appendChild(wrap);
     return { close, el: wrap, body: bodyWrap, buttons, rightWrap };
@@ -251,6 +257,24 @@ App.ui = (function () {
   function fmtDate(ts) { const d = new Date(ts); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
   function fmtDateTime(ts) { const d = new Date(ts); return fmtDate(ts) + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
   function monthKey(ts) { const d = new Date(ts); return d.getFullYear() + '-' + (d.getMonth() + 1); }
+
+  // —— 时长（计时功能的统一口径，别再各处 toFixed 了）——
+  //   fmtDuration(121)         → "2 小时 1 分"；fmtDuration(37) → "37 分"；空值 → ""
+  //   fmtDuration(121,'short') → "2h1m"（卡片窄位置用；原来 (min/60).toFixed(1)+' h' 会把 121 分钟写成 "2.0 h"）
+  //   fmtClock(3723)           → "1:02:03"；fmtClock(83) → "01:23"（计时器实时读数）
+  function fmtDuration(min, mode) {
+    const m = Math.max(0, Math.round(Number(min) || 0));
+    if (!m) return '';
+    const h = Math.floor(m / 60), mm = m % 60;
+    if (mode === 'short') return h ? (h + 'h' + (mm ? mm + 'm' : '')) : (m + 'm');
+    return h ? (h + ' 小时' + (mm ? ' ' + mm + ' 分' : '')) : (m + ' 分');
+  }
+  function fmtClock(sec) {
+    const s = Math.max(0, Math.floor(Number(sec) || 0));
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+    const p = (n) => String(n).padStart(2, '0');
+    return h ? (h + ':' + p(m) + ':' + p(ss)) : (p(m) + ':' + p(ss));
+  }
 
   // —— 快捷新建分类 / 标签（供列表与编辑器复用）——
   function quickAddCategory(domain, onAdded) {
@@ -841,7 +865,13 @@ App.ui = (function () {
     if (closeImageViewer()) return true;
     if (colorPopState) { closeColorPicker(); return true; }
     if (selMenuState) { closeSelMenu(); return true; }
-    if (modalStack.length) { modalStack[modalStack.length - 1](); return true; }
+    if (modalStack.length) {
+      const top = modalStack[modalStack.length - 1];
+      // 先问最上层要不要自己消费（全屏页的三视图回正文），再执行关闭
+      if (top && typeof top.onBack === 'function' && top.onBack()) return true;
+      top();
+      return true;
+    }
     return false;
   }
 
@@ -850,6 +880,6 @@ App.ui = (function () {
     showBusy, hideBusy, isBusy, setBusyText,
     makeSelect, closeSelMenu, openCalendar, openColorPicker, closeColorPicker, openImageViewer,
     closeImageViewer, isImageViewerOpen, closeTopLayer,
-    fmtMoney, fmtDate, fmtDateTime, monthKey, quickAddCategory, quickAddTag,
+    fmtMoney, fmtDate, fmtDateTime, monthKey, fmtDuration, fmtClock, quickAddCategory, quickAddTag,
   };
 })();

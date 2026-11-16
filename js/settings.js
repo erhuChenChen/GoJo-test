@@ -16,11 +16,11 @@ App.settings = (function () {
   // ===== 关于页配置 =====
   // 兜底版本号：只有拿不到运行时版本时才用它（原生打包后优先读 plus.runtime.version，
   // 也就是 manifest.json 里配置的 versionName，改了包名/版本号这里不需要跟着改）。
-  const APP_VERSION = '1.0.0';
+  const APP_VERSION = '2.0.0';
   // 检查更新要请求的 GitHub 仓库，格式 '用户名/仓库名'。
   // 例如仓库是 https://github.com/zhangsan/gojo 就填 'zhangsan/gojo'。
   // 留空则点「检查更新」会提示未配置（不会报错、不会白屏）。
-  const UPDATE_REPO = 'erhuChenChen/GoJo-test';
+  const UPDATE_REPO = '';
   // 使用说明：直接平铺展示的文字，整段替换成你自己的内容即可。
   // 这里的内容会按 Markdown 渲染（## 是二级标题、- 是列表项、**文字** 是加粗），
   // 写普通换行也可以，会原样换行显示。

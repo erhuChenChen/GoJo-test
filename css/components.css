@@ -971,18 +971,212 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
   border-bottom: 1px solid var(--border);
 }
 .page-sheet-head .psh-title { flex: 1 1 auto; min-width: 0; text-align: center; font-size: calc(var(--font-scale, 1) * 16px); font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.page-sheet-head .psh-side { flex: 0 0 40px; display: flex; align-items: center; }
+/* 左右两侧等宽：右侧现在要放「笔记信息 ⋯ + 保存 ✓」两个 40px 图标，
+   左侧同步留 80px，标题才仍然居中（否则会整体偏左 20px）。 */
+.page-sheet-head .psh-side { flex: 0 0 80px; display: flex; align-items: center; }
 .page-sheet-head .psh-right { justify-content: flex-end; }
+.page-sheet-head .ed-meta { flex: 0 0 auto; color: var(--text-dim); }
 .page-sheet-back { color: var(--text-dim); }
 /* 顶栏右上角的「保存」对勾：尺寸/圆角/热区与左上角的叉完全一致，只是用强调色区分主操作 */
 .page-sheet-save { color: var(--accent); }
 .page-sheet-body {
-  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-  /* 关掉滚动锚定：正文 textarea 逐键长高时，锚定会和 pinScroll 互相拉扯，位置反而抖 */
-  overflow-anchor: none;
-  padding: 12px max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right)) 20px;
+  flex: 1 1 auto; min-height: 0;
+  /* 改成横向三视图之后，这里不再是滚动容器 —— 只当「轨道外壳」：
+     滚动交给每个视图自己的 .ed-scroll，内边距也各自负责（否则卡片贴不到边）。
+     flex-direction 必须显式写 column：默认 row 时 .ed-views 会被当成行内 flex 项，
+     宽度取 max-content（= 卡片内容宽 + 两侧留边），比视口还宽 → 卡片右侧被视口切掉。
+     column + stretch 才是「和原来的块级布局一模一样」。 */
+  display: flex; flex-direction: column; align-items: stretch;
+  overflow: hidden;
+  padding: 0;
 }
+
+/* ===== 编辑页横向三视图（图片 / 正文 / 步骤·计时）=====
+   结构：.page-sheet-body > .ed-views（横向裁剪）> .ed-track > .ed-slot × 3 > .ed-card > .ed-scroll
+   几何：卡片在 slot 内左右各让 --ed-edge，槽间距 --ed-gap，
+        所以「静止时露出的邻卡宽度 = --ed-edge − --ed-gap」（默认 10 − 4 = 6px）。
+   三张卡常驻 DOM，只用 transform 移动 —— 这是「切视图不丢状态」的实现基础，
+   任何时候都不要改成 display 切换或 innerHTML 重建（会丢滚动位置、丢光标、丢计时）。
+   注意：轨道常驻 transform，所以它内部绝不能放 position:fixed 的东西
+   （.ed-dock 因此留在 .page-sheet 上，不进轨道；新增浮层一律挂 #modal-root / body）。 */
+.ed-views {
+  flex: 1 1 auto; min-height: 0; height: 100%; position: relative;
+  /* width:100% + min-width:0：宽度必须由外壳决定，绝不能反过来由卡片内容撑开
+     （否则长标题 / 宽表格会把整列顶出屏幕，右侧内容被视口裁掉） */
+  width: 100%; min-width: 0;
+  /* clip 而不是 hidden：clip 只裁剪、不创建滚动容器，内部 .ed-scroll 的纵向滚动
+     与 .ed-dock-tools 的横向滑动都不会被压死（与 base.css 里 overflow-x:clip 同一理由） */
+  overflow: clip;
+  padding: 0 var(--ed-edge, 10px);
+  box-sizing: border-box;
+  touch-action: pan-y;          /* 纵向交还系统，横向留给切换手势 */
+}
+.ed-track {
+  display: flex; gap: var(--ed-gap, 4px);
+  height: 100%; will-change: transform;
+  transition: transform .28s cubic-bezier(.22,.7,.28,1);
+}
+.ed-slot { flex: 0 0 100%; height: 100%; min-width: 0; }
+.ed-card {
+  position: relative; height: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column;
+  border-radius: 14px; overflow: hidden;
+  /* 绝不用 backdrop-filter：三张卡各叠一层模糊、里面还在滚 textarea，中低端机直接掉帧 */
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .16);
+  contain: paint;
+  transition: transform .28s cubic-bezier(.22,.7,.28,1), opacity .28s;
+}
+.ed-scroll {
+  flex: 1 1 auto; min-height: 0;
+  overflow-y: auto; overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  overflow-anchor: none;        /* 与原来 .page-sheet-body 同因：别跟 pinScroll 抢 */
+  touch-action: pan-y;
+  /* 底部只留 24px 呼吸位：胶囊已经搬到页面最底部那一行（.ed-dock-pill），不再压卡片。
+     这个值也绝不能随聚焦变化 —— 一变就重排、浏览器又把光标滚进可视区，
+     就是「点一下正文整页跳一下」的老坑。 */
+  padding: 12px 8px 24px;
+  box-sizing: border-box;
+}
+
+/* 正文卡里的滚动区兼「竖向弹性外壳」：标题区固定在上面，正文吃掉剩下的全部高度。
+   只对正文卡生效（data-ed-scroll），图片/步骤卡的滚动区仍是普通块级容器。
+   底部的「让位」不放在这里：flex 列滚动容器的 padding-bottom 在部分内核里
+   不计入可滚高度，滚到底时最后一行会正好压到卡片边缘、被悬浮胶囊盖住。
+   所以正文卡把让位改成 textarea 自己的内边距（元素内的 padding 一定算进 scrollHeight）。 */
+.ed-scroll[data-ed-scroll] { display: flex; flex-direction: column; padding-bottom: 0; }
+
+/* 视图切换胶囊：住在页面最底部那一行（.ed-dock-pill）里。
+   演进：43px 标签行 → 卡片底部悬浮 38px 胶囊 → 贴底 26px 迷你胶囊。
+   最后这一步顺带把「卡片要留 56px 让位」这个包袱也卸了 —— 胶囊不再压任何正文。 */
+/* 尺寸账：2(边框) + 2×2(padding) + 20(tab 高) = 26px，正好塞进 29px 的底部条，
+   还留 1.5px 上下余量 —— 这一行不能改高，改了就会破坏「换内容零跳动」。 */
+.ed-tabpill {
+  pointer-events: auto;
+  display: inline-flex; align-items: center; gap: 1px;
+  height: 26px; padding: 2px; border-radius: 999px;
+  background: var(--bg-alpha, rgba(21, 23, 28, .88));
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+.ed-tab {
+  flex: 0 1 auto; min-width: 0; height: 20px; padding: 0 9px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  border: 0; border-radius: var(--radius-pill);
+  font-family: inherit; font-size: calc(var(--font-scale, 1) * 11.5px); font-weight: 700;
+  color: var(--text-dim); background: transparent;
+  white-space: nowrap; overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  transition: background .18s ease, color .18s ease;
+}
+.ed-tab.on { color: var(--on-accent); background: var(--accent); }
+.ed-tab-n { font-size: 9.5px; font-weight: 800; opacity: .82; font-variant-numeric: tabular-nums; }
+
+/* 正文聚焦打字时整条换成 Markdown 排版栏：胶囊让位（只切 opacity/visibility，
+   与排版栏同高 29px，布局零变化）。 */
+.page-sheet.editing .ed-dock-pill { opacity: 0; visibility: hidden; pointer-events: none; }
+
+/* 投入分钟右侧的回显：「= 2 小时 1 分」 */
+.ed-time-hint { flex: 0 0 auto; font-size: 12px; white-space: nowrap; }
+
+/* 正文卡的固定头部：只有标题（原来还有一行待办摘要，20261117a 删了）。
+   正文滚多长它都不动，所以「标题永远在」这件事不靠 sticky，不会跟滚动容器抢手势。 */
+.ed-text-head {
+  flex: 0 0 auto; padding: 8px 8px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.ed-text-head .ed-title { padding: 0 0 8px; }
+.ed-text-head .ed-desc-wrap { margin: 0; }
+
+
+/* ===== 步骤与分段计时（右侧第三张卡）===== */
+.steps-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 2px 2px 10px; margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.steps-stat { flex: 1 1 auto; display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: calc(var(--font-scale, 1) * 12px); }
+.steps-total { font-size: calc(var(--font-scale, 1) * 15px); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.steps-head .muted { font-size: calc(var(--font-scale, 1) * 12px); white-space: nowrap; }
+.steps-head .steps-add { flex: 0 0 auto; }
+.steps-list { display: flex; flex-direction: column; gap: 8px; }
+.steps-empty { padding: 18px 10px; text-align: center; color: var(--text-dim); font-size: 13px; line-height: 1.7; }
+.step-row { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 10px; }
+.step-row.is-live { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-soft); }
+.step-row.is-done .step-name { text-decoration: line-through; color: var(--text-dim); }
+.step-top { display: flex; align-items: center; gap: 8px; }
+.step-chk {
+  flex: 0 0 auto; width: 22px; height: 22px; padding: 0;
+  border-radius: 7px; border: 1.5px solid var(--border); background: transparent;
+  color: var(--on-accent); display: flex; align-items: center; justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+}
+.step-chk.on { background: var(--accent); border-color: var(--accent); }
+.step-chk svg { display: block; }
+.step-name {
+  flex: 1 1 auto; min-width: 0; padding: 0; border: 0; background: transparent;
+  font-family: inherit; font-size: calc(var(--font-scale, 1) * 14.5px); font-weight: 700; color: var(--text);
+  text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  -webkit-tap-highlight-color: transparent;
+}
+.step-dur { flex: 0 0 auto; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-dim); }
+.step-more { flex: 0 0 auto; width: 28px; height: 28px; color: var(--text-dim); }
+.step-segs { margin: 8px 0 0 30px; display: flex; flex-direction: column; gap: 4px; }
+.seg-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); }
+.seg-time { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.seg-row.is-live .seg-time { color: var(--accent); font-weight: 800; }
+.seg-note {
+  flex: 1 1 auto; min-width: 0; padding: 0; border: 0; background: transparent;
+  font-family: inherit; font-size: 12px; color: var(--text-dim); text-align: left;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  -webkit-tap-highlight-color: transparent;
+}
+.seg-note:active { color: var(--accent); }
+.seg-del { flex: 0 0 auto; width: 22px; height: 22px; color: var(--text-dim); opacity: .65; }
+.step-actions { display: flex; gap: 8px; margin: 8px 0 0 30px; }
+.step-timer {
+  display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 12px;
+  border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text); font-family: inherit; font-size: calc(var(--font-scale, 1) * 12.5px); font-weight: 700;
+  -webkit-tap-highlight-color: transparent;
+}
+.step-timer:active { background: var(--accent-soft); }
+.step-timer.is-run { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.step-timer-ic { display: inline-flex; }
+.step-timer-ic svg { display: block; }
+
+/* ===== 详情页的「步骤与用时」块（只读展示 + 就地勾选）=====
+   复用编辑页的 .step-top / .step-chk / .step-dur / .step-segs / .seg-row，
+   这里只补「块级外壳」和「只读的步骤名 / 分段备注」。 */
+.detail-steps { margin: 16px 0 2px; padding-top: 12px; border-top: 1px solid var(--border); }
+.dst-head { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+.dst-title { font-size: calc(var(--font-scale, 1) * 13.5px); font-weight: 800; color: var(--text); }
+.dst-sum { margin-left: auto; font-size: calc(var(--font-scale, 1) * 12px); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.dst-head .steps-add { flex: 0 0 auto; width: 28px; height: 28px; }
+.dst-list { display: flex; flex-direction: column; gap: 8px; }
+.dst-step { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 10px; }
+/* 正在计时的这一条：描边换成强调色，一眼看出「表在跑」 */
+.dst-step.is-live { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-soft); }
+.dst-step.is-done .dst-name { text-decoration: line-through; color: var(--text-dim); }
+.dst-name { flex: 1 1 auto; min-width: 0; font-size: calc(var(--font-scale, 1) * 14px); font-weight: 700; color: var(--text); word-break: break-word; }
+/* 计时 / 结束按钮行：与待办名左对齐（30px = 勾选框 18 + gap 12） */
+.dst-acts { display: flex; align-items: center; gap: 8px; margin: 8px 0 0 30px; }
+/* 有分段列表时按钮统一沉到列表下方，与上面的时钟左对齐（不再额外缩进 30px） */
+.dst-step .step-segs + .dst-acts { margin-left: 0; }
+.dst-acts .step-timer { height: 26px; padding: 0 10px; font-size: calc(var(--font-scale, 1) * 12px); }
+.dst-acts .step-timer.is-fin { color: var(--accent); border-color: var(--accent); }
+/* 分段备注：可点即改（原来只读），样式与编辑页 .seg-note 对齐 */
+.seg-note-ro {
+  flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  text-align: left; background: transparent; border: 0; padding: 0;
+  font-family: inherit; -webkit-tap-highlight-color: transparent;
+}
+.seg-note-ro:active { color: var(--accent); }
 .page-sheet-foot {
   position: relative;   /* 字数胶囊以它为基准，用 bottom:100% 浮在栏顶上方 */
   flex: 0 0 auto; display: flex; gap: 10px;
@@ -992,6 +1186,64 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 }
 .page-sheet-foot .btn { flex: 1 1 0; height: 46px; }
 
+/* ===== 计时小窗（.tmwin，挂 body，全局常驻）=====
+   为什么不是「贴底通栏条」：通栏会盖住正文/评论区，而且详情页本身就有一条底栏；
+   小窗可以被拖到顺手的位置并记住位置（KV: timerWinPos），折叠状态记在 timerWinMini。
+   层级 55：必须压过 .page-sheet(50) —— 计时中打开编辑页也得看得见；
+   但仍被 popmenu(70)/toast(80) 盖住，弹菜单/提示时不会挡住操作。 */
+.tmwin {
+  position: fixed; z-index: 55; left: 0; top: 0;
+  width: 148px; box-sizing: border-box;
+  padding: 6px 8px 7px;
+  border-radius: 14px;
+  background: var(--bg-2); border: 1px solid var(--border);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .30), 0 1px 3px rgba(0, 0, 0, .18);
+  color: var(--text);
+  font-size: calc(var(--font-scale, 1) * 12px);
+  /* 拖它时不要滚页面；页面其余区域仍是默认的 pan-y */
+  touch-action: none;
+  /* 坐标算好之前绝不显示，否则会闪一帧在左上角 */
+  visibility: hidden; opacity: 0;
+  -webkit-user-select: none; user-select: none;
+}
+.tmwin.on { visibility: visible; opacity: 1; transition: opacity .14s ease; }
+.tmwin.dragging { transition: none; box-shadow: 0 14px 34px rgba(0, 0, 0, .38); }
+.tmwin.snap { transition: left .18s cubic-bezier(.22,.7,.28,1), top .18s cubic-bezier(.22,.7,.28,1); }
+/* 折叠态：只剩「● 00:03」一颗小胶囊，点时钟展开。
+   只改宽度与子项可见性，不做高度动画（宽度变了要重新吸边，见 setTimerWinMini）。 */
+.tmwin.mini { width: auto; padding: 5px 9px; cursor: pointer; }
+.tmwin.mini .tmwin-sp,
+.tmwin.mini .tmwin-btn,
+.tmwin.mini .tmwin-sub { display: none; }
+.tmwin-top { display: flex; align-items: center; gap: 6px; }
+.tmwin-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; animation: gtPulse 1.6s ease-in-out infinite; }
+.tmwin-clock { font-variant-numeric: tabular-nums; font-weight: 800; font-size: calc(var(--font-scale, 1) * 14px); }
+.tmwin-sp { flex: 1 1 auto; }
+.tmwin-btn {
+  flex: 0 0 auto; width: 24px; height: 24px; border: 0; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface-2); color: var(--text-dim);
+  font-family: inherit; font-size: 15px; font-weight: 700; line-height: 1;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.tmwin-btn:active { background: var(--accent-soft); color: var(--accent); }
+.tmwin-sub { display: flex; align-items: center; gap: 6px; margin-top: 4px; min-width: 0; }
+.tmwin-name {
+  flex: 1 1 auto; min-width: 0; font-weight: 700;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tmwin-note {
+  flex: 0 0 auto; max-width: 56px; padding: 2px 7px;
+  border: 0; border-radius: 999px; background: var(--surface);
+  color: var(--text-dim); font-family: inherit;
+  font-size: calc(var(--font-scale, 1) * 10.5px);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+.tmwin-note.is-empty { opacity: .78; }
+.tmwin-note:active { color: var(--accent); }
+
 /* ===== 编辑页 Markdown 排版栏（.ed-dock，取代原底部「取消 / 保存」栏）=====
    出现时机：正文聚焦才显示（.is-open），失焦 / 点到别处 180ms 后收起 —— 不常驻占屏。
    高度严格 29px = 1px 上边线 + 28px 一行按钮 = 一行标准正文（16px × 1.78 ≈ 28.5px）。
@@ -1000,30 +1252,44 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
    所以高度永久占位，显隐只切 visibility / opacity / pointer-events，布局零抖动。 */
 .ed-dock {
   flex: 0 0 auto; position: relative; z-index: 8;
-  display: flex; flex-direction: column;
   box-sizing: border-box; height: 29px;
-  margin: 0;
-  padding: 0 max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right));
-  background: var(--bg); border-top: 1px solid var(--border);
-  visibility: hidden; opacity: 0; pointer-events: none;
+  margin: 0; padding: 0;
+  background: var(--bg);
+  border-top: 0;                      /* 常态放胶囊时不画线，免得底部多一条常驻分割线 */
+  visibility: visible; opacity: 1; pointer-events: auto;   /* 这一行现在永远有内容（胶囊） */
   transition: bottom .16s ease-out;
 }
-.ed-dock.is-open { visibility: visible; opacity: 1; pointer-events: auto; }
+.ed-dock.is-open { border-top: 1px solid var(--border); }
 /* 键盘是 adjustPan / 悬浮键盘时（视口没变矮）整条浮到键盘上沿 */
 .ed-dock.is-floating {
   position: fixed; left: 0; right: 0; bottom: 0;
   box-shadow: 0 -8px 24px rgba(0, 0, 0, .28);
 }
 
+/* 两套内容绝对叠在同一格 29px 上：常态是视图胶囊，打字时是 Markdown 排版栏。
+   叠放（而不是上下排）是为了「换内容不换高度」—— 高度一变，浏览器就会把光标
+   重新滚进可视区，那就是「点一下正文整页跳一下」。 */
+.ed-dock-pill {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right));
+  transition: opacity .16s ease;      /* 只过渡 opacity：visibility 若参与过渡，低帧率时会把值卡在旧状态 */
+}
+.ed-dock.is-open .ed-dock-pill { visibility: hidden; opacity: 0; pointer-events: none; }
+
 /* 按钮行：横向滑动，绝不换行、不压缩按钮 */
 .ed-dock-tools {
-  flex: 0 1 auto; height: 100%; min-width: 0;
+  position: absolute; inset: 0;
+  min-width: 0;
   display: flex; align-items: center; gap: 0;
   overflow-x: auto; overflow-y: hidden;
   -webkit-overflow-scrolling: touch; scrollbar-width: none;
   overscroll-behavior-x: contain;
-  margin: 0; padding: 0;
+  margin: 0; padding: 0 max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right));
+  visibility: hidden; opacity: 0; pointer-events: none;
+  transition: opacity .16s ease;      /* 同上：只过渡 opacity */
 }
+.ed-dock.is-open .ed-dock-tools { visibility: visible; opacity: 1; pointer-events: auto; }
 .ed-dock-tools::-webkit-scrollbar { display: none; }
 
 /* 单个按钮：32×28、右左间距 0 —— 整条只有一行正文那么高 */
@@ -1082,19 +1348,27 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 .ed-form { display: flex; flex-direction: column; padding-bottom: 8px; }
 .ed-media { margin: 2px 0 12px; }
 .ed-title {
-  width: 100%; border: none; border-bottom: 1px solid var(--border); border-radius: 0;
+  width: 100%; border: none; border-radius: 0;
   background: transparent; color: var(--text); font-family: inherit;
   font-size: calc(var(--font-scale, 1) * 20px); font-weight: 700;
   padding: 10px 2px 8px; outline: none;
 }
 .ed-title::placeholder { color: var(--text-dim); font-weight: 600; }
-/* 正文外层：只负责表单间距。
-   （字数胶囊已经从这一层挪到按钮栏上方，不再需要 position:relative 兜着它；
-   margin 仍留在这里 —— position:relative 不建立 BFC，放回 textarea 上会穿透出去。） */
-.ed-desc-wrap { position: relative; margin: 12px 0 16px; }
+/* 正文外层：表单间距 + 纵向弹性。
+   正文视图整屏都是文字，输入框必须撑满剩下的高度（点卡片下半部分也能开始打字），
+   所以这一层是 flex column 的弹性项，textarea 在它里面 flex-grow。 */
+.ed-desc-wrap {
+  position: relative; margin: 12px 0 0;
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column;
+}
 .ed-desc {
   width: 100%; min-height: 120px; margin: 0;
-  border: none; border-bottom: 1px solid var(--border); border-radius: 0;
+  border: none; border-radius: 0;
+  /* 撑满可用高度：grow 吃掉剩余空间，shrink 必须为 0 ——
+     否则长文会被压回容器高，末尾几行永远看不到（外层 .ed-scroll 才负责滚动）。
+     内容比可用高时由 growDesc 写死行内 height，那时这个 grow 会被撑破并让外层滚动。 */
+  flex: 1 0 auto;
   background: transparent; color: var(--text); font-family: inherit;
   /* 与详情页正文保持完全一致的排版（只对齐编辑态，不动详情样式）：
      · 字号 1rem：详情正文继承 body 的 1rem(16px)，编辑框同值才能「每行字数」一致；
@@ -1107,10 +1381,63 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
   -webkit-text-size-adjust: none; text-size-adjust: none;
   white-space: pre-wrap;
   /* 高度由 JS 按内容撑开（scrollHeight），所以这里不许出现内层滚动条。
-     底部留 8px：字数胶囊浮在排版栏上沿之外，框里不需要为它预留空白带。 */
-  padding: 8px 17px; outline: none; resize: none; overflow: hidden; display: block;
+     底部只留 24px 呼吸位：视图胶囊已经搬到页面最底部的 .ed-dock 里，不再压卡片。
+     这个让位放在 textarea 自己的 padding 上（而不是外层滚动容器），
+     因为元素内的 padding 一定计入 scrollHeight —— 外层 flex 滚动容器的 padding-bottom
+     在部分内核里不计入可滚高度，滚到底时最后一行会贴到卡片边缘。 */
+  /* 左右 6px（原来 17px）：外层 .ed-scroll 已有 14px，加起来 20px ——
+     标题也在 20px 上（.ed-text-head 6px + .ed-title 0），文字与卡片边框之间不再显得空。
+     代价是与详情页的换行点不再逐字一致（可用宽度 +22px），优先照顾「编辑时看着不空」。 */
+  padding: 6px 2px 24px; outline: none; resize: none; overflow: hidden; display: block;
 }
 .ed-desc::placeholder { color: var(--text-dim); }
+
+/* ===== 即时 Markdown（块级渲染层 .ed-doc）=====
+   正文容器里「要么是整篇 textarea，要么是这块渲染层」，由 .ed-desc-wrap[data-mode] 决定。
+   排版口径与 .ed-desc 完全一致（字号 1rem / 行高 1.78 / 左右 6px / 底部 24px 让位），
+   所以从源码模式切到即时模式，每行位置基本不动。 */
+.ed-doc {
+  flex: 1 0 auto; min-height: 0;
+  padding: 6px 2px 24px;
+  box-sizing: border-box;
+  font-size: 1rem; line-height: 1.78;
+  -webkit-text-size-adjust: none; text-size-adjust: none;
+  color: var(--text);
+}
+/* 空行块：只负责撑出那段空白（高度由行内 style 按行数算） */
+.ed-doc .ed-gap { width: 100%; }
+/* 渲染块自己不带上下外边距 —— 段间距一律由空行块承担，否则「一个空行」会被算成两倍 */
+.ed-doc .ed-block > :first-child { margin-top: 0; }
+.ed-doc .ed-block > :last-child { margin-bottom: 0; }
+.ed-doc .md-body p, .ed-doc .md-body ul, .ed-doc .md-body ol,
+.ed-doc .md-body blockquote, .ed-doc .md-body pre.md-pre,
+.ed-doc .md-body h1, .ed-doc .md-body h2, .ed-doc .md-body h3,
+.ed-doc .md-body h4, .ed-doc .md-body h5, .ed-doc .md-body h6 { margin: 0; }
+.ed-doc .md-body ul, .ed-doc .md-body ol { padding-left: 1.4em; }
+.ed-doc .md-body blockquote { padding-left: 10px; border-left: 3px solid var(--border); color: var(--text-dim); }
+.ed-doc .md-body hr { margin: 0; }
+.ed-md-empty { color: var(--text-dim); padding: 2px 0; }
+/* 正在编辑的那一块：把渲染内容藏掉、只留源码输入框（不是叠在上面） */
+.ed-block.is-editing > *:not(.blk-src) { display: none; }
+/* 块内的源码输入框：不吃 .ed-desc 那套「撑满 / 120px 下限 / 底部让位」 */
+.blk-src {
+  display: block; width: 100%; margin: 0; padding: 0;
+  border: 0; border-radius: 0; background: transparent; color: var(--text);
+  font-family: inherit; font-size: 1rem; line-height: 1.78;
+  white-space: pre-wrap; overflow: hidden; resize: none;
+  -webkit-text-size-adjust: none; text-size-adjust: none;
+  outline: none;
+}
+/* 胶囊右端的「源码/即时」按钮：是胶囊的一部分（不参与 tabpill 的居中计算之外的东西，
+   只占 20px，靠 margin 拉开一点距离） */
+.ed-pill-mode {
+  width: 20px; height: 20px; padding: 0; margin-left: 1px;
+  border: 0; border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--text-dim);
+  -webkit-tap-highlight-color: transparent;
+}
+.ed-pill-mode:active { background: var(--surface-2); color: var(--accent); }
 
 /* 字数胶囊：极小、悬浮在正文右下角（编辑态与详情查看态共用）。 */
 .count-pill {
@@ -1138,15 +1465,24 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
   margin-bottom: 0;
   z-index: 3;
   box-shadow: 0 4px 14px rgba(0, 0, 0, .28);
+  /* dock 现在常态可见（平常放视图胶囊），所以字数胶囊不能再靠 dock 的 visibility 一起藏，
+     必须自己跟着 .is-open 走，否则不写字时右下角一直挂着一个「0 字」。 */
+  visibility: hidden; opacity: 0;
+  /* 不加 transition：字数胶囊跟着焦点瞬时显隐（32 级灰度的淡入淡出反而像卡顿），
+     也避免「visibility 参与过渡」在低帧率/后台时把值卡在旧状态上。 */
 }
+.ed-dock.is-open .count-pill.float { visibility: visible; opacity: 1; }
 .ed-inline { display: flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; }
 .ed-inline .input { flex: 1 1 auto; min-width: 0; width: auto; }
 .ed-inline .muted { font-size: calc(var(--font-scale, 1) * 12.5px); white-space: nowrap; }
 
 /* 图片区：大尺寸网格（手机上两列，每格约半屏宽，预览更大更清楚）
    —— 已回退此前那套「横向大图滑动」的复杂排版，恢复为最初的网格结构。 */
-.media-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
-.media-grid.empty { grid-template-columns: 1fr; }
+/* 图片视图：单列满宽、按原图比例上下排列。
+   高度由 JS（layoutCell）写死在 .mg-item 上，img 只负责填满它：
+   图片加载前就有稳定高度，不会「加载一张跳一下」；超高图也能在同一处封顶。 */
+.media-grid { display: flex; flex-direction: column; gap: 10px; }
+.media-grid.empty { display: block; }
 .media-grid.drag .mg-item, .media-grid.drag .mg-add { opacity: .55; }
 .media-drop {
   width: 100%; min-height: 210px; border: 1.5px dashed var(--border); border-radius: var(--radius);
@@ -1156,16 +1492,63 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 .media-drop:active { border-color: var(--accent); }
 .media-drop .md-icon { font-size: calc(var(--font-scale, 1) * 30px); opacity: .85; }
 .media-drop .md-text { font-size: calc(var(--font-scale, 1) * 15px); font-weight: 700; color: var(--text); }
-.mg-item { position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--border); }
-.mg-item img { width: 100%; height: 100%; object-fit: cover; -webkit-user-drag: none; user-select: none; }
-.mg-item .rm { position: absolute; top: 5px; right: 5px; width: 24px; height: 24px; border-radius: 50%; background: rgba(0,0,0,0.55); color: #fff; display: flex; align-items: center; justify-content: center; font-size: calc(var(--font-scale, 1) * 15px); line-height: 1; }
+.mg-item {
+  position: relative; width: 100%; flex: 0 0 auto;
+  border-radius: 12px; overflow: hidden;
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+/* cover + object-position:top —— 正常比例时格子高度就是原图比例，等于「原样显示」；
+   被封顶的长截图则只露出最上面那一段（用户想看的就是开头）。 */
+.mg-item img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; object-position: center top;
+  -webkit-user-drag: none; user-select: none; display: block;
+}
 .mg-add {
-  aspect-ratio: 1; border-radius: 12px; border: 1.5px dashed var(--border); background: var(--surface);
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
-  color: var(--text-dim); font-size: calc(var(--font-scale, 1) * 12px); cursor: pointer;
+  flex: 0 0 auto; height: 72px; border-radius: 12px; border: 1.5px dashed var(--border); background: var(--surface);
+  display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 6px;
+  color: var(--text-dim); font-size: calc(var(--font-scale, 1) * 13px); cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 .mg-add:active { border-color: var(--accent); color: var(--accent); }
-@media (min-width: 640px) { .media-grid { grid-template-columns: repeat(3, 1fr); } }
+/* 控件一行放顶部：满宽图可能两千多像素高，贴在格底角的按钮会直接滚出屏幕点不到。
+   顶部垫一层暗色渐变，白图标压在亮照片上也看得清。 */
+.mg-bar {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 2;
+  display: flex; align-items: center; gap: 6px; padding: 7px;
+  background: linear-gradient(rgba(0, 0, 0, .42), rgba(0, 0, 0, 0));
+}
+.mg-item .mg-idx {
+  margin-right: auto; min-width: 20px; height: 20px; padding: 0 6px;
+  border-radius: 999px; background: rgba(0, 0, 0, .55); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: calc(var(--font-scale, 1) * 11px); font-weight: 800; font-variant-numeric: tabular-nums;
+}
+.mg-item .mg-grip, .mg-item .rm {
+  width: 26px; height: 26px; border-radius: 999px;
+  background: rgba(0, 0, 0, .55); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: calc(var(--font-scale, 1) * 15px); line-height: 1;
+  -webkit-tap-highlight-color: transparent;
+}
+.mg-item .mg-grip svg { display: block; }
+/* 超高图（长截图）裁切后的底部渐隐 + 提示。纯装饰，pointer-events:none 不拦手势，
+   点整格才是开大图。只有 .is-capped 的格子上才显形。 */
+.mg-fade {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 110px; z-index: 1;
+  background: linear-gradient(rgba(0, 0, 0, 0), var(--bg-2));
+  opacity: 0; transition: opacity .2s ease; pointer-events: none;
+}
+.mg-more {
+  position: absolute; left: 50%; bottom: 14px; z-index: 2;
+  transform: translateX(-50%);
+  padding: 4px 10px; border-radius: 999px;
+  background: rgba(0, 0, 0, .55); color: #fff;
+  font-size: calc(var(--font-scale, 1) * 11.5px); font-weight: 700; white-space: nowrap;
+  opacity: 0; transition: opacity .2s ease; pointer-events: none;
+}
+.mg-item.is-capped .mg-fade, .mg-item.is-capped .mg-more { opacity: 1; }
+.ed-hmenu-item[disabled] { opacity: .34; }
 
 /* 评论楼层号：与时间同色，跟在时间后面 */
 .comment .c-floor { color: var(--text-dim); font-variant-numeric: tabular-nums; }
