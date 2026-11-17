@@ -222,6 +222,25 @@
 .record-card .rc-foot { margin-top: auto; padding-top: 4px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .record-card .rc-foot .rc-date { margin-top: 0; padding-top: 0; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .record-card .rc-count { flex: 0 0 auto; font-size: calc(var(--font-scale, 1) * 11px); line-height: 1.4; color: var(--text-dim); opacity: .9; white-space: nowrap; }
+/* 卡片脚注里的待办进度徽标：与「N 字」同排同字号，垂直居中不变形 */
+.record-card .rc-prog { flex: 0 0 auto; font-size: calc(var(--font-scale, 1) * 11px); line-height: 1.4; color: var(--text-dim); opacity: .95; }
+
+/* ===== 待办进度徽标（.prog）=====
+   列表卡片脚注与详情页待办块共用：▢3/5 未完成，☑5/5 全部完成。
+   方框是 CSS 画的、对勾是 svg —— 旧 WebView 的中文字体经常缺 U+25A2 / U+2611，
+   直接写 ▢ / ☑ 会在某些机型上变成豆腐块（这个项目里踩过 emoji 缺字的坑）。
+   全部完成时方框填强调色 + 白对勾，与详情页每条待办的 .step-chk.on 完全同款。 */
+.prog { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.prog-box {
+  flex: 0 0 auto; width: 10px; height: 10px; box-sizing: border-box;
+  border: 1.3px solid currentColor; border-radius: 2.5px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.prog-box svg { display: block; }
+/* 全部完成时只填方框（+ 白对勾），数字保持父级的灰 ——
+   原来这里还有一条 .prog.is-all{color:var(--accent)}，会把「3/3」整串染成强调色，
+   但用户要的只有「对勾符号的背景色」变强调色。 */
+.prog.is-all .prog-box { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 
 /* 列表顶部工具条：左侧[添加/选择] 右侧[排序/筛选] 两端对齐，中间留白
    （display / 折行 / 横向滑动 / 锁宽 / 隐藏滚动条 已由顶部公共基类提供） */
@@ -349,8 +368,10 @@
 /* 详情页顶部「分类 + 日期」行里的「xx 字」：紧跟日期，纯文字，弱化处理 */
 .detail-count { font-size: calc(var(--font-scale, 1) * 12px); line-height: 1.6; align-self: center; flex: 0 0 auto; white-space: nowrap; }
 
-/* 弹窗 */
-.modal-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: flex-end; justify-content: center; }
+/* 弹窗
+   z-index 56：必须高过 .tmwin(55) 与 .focus-page(53) —— 专注页里点「备注」弹出的输入框、
+   计时中弹出的确认框，都要盖在当前最上层；同时仍低于 popmenu(70)/toast(80)。 */
+.modal-backdrop { position: fixed; inset: 0; z-index: 56; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: flex-end; justify-content: center; }
 @media (min-width: 640px){ .modal-backdrop { align-items: center; } }
 .modal {
   width: 100%; max-width: 560px; max-height: 92vh;
@@ -954,11 +975,23 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 .emoji-pick .emoji-opt.active { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-soft); }
 
 /* ===== 全屏页（新建 / 编辑记录）=====
-   废弃弹窗：占满整屏，头部与底部按钮固定，中间内容区独立滚动。 */
+   废弃弹窗：占满整屏，头部与底部按钮固定，中间内容区独立滚动。
+   层级 50：压住 nav(30)/fab(40)/batch(45)；比专注页(53)、小窗(55)、弹窗(56) 低 ——
+   从编辑页点「放大」进专注页时，专注页要盖在这层之上。 */
 .page-sheet {
   position: fixed; inset: 0; z-index: 50;
   display: flex; flex-direction: column;
   background: var(--bg);
+}
+/* 环境光晕：必须与 body::before 同参数、同位置（左上角 100vmin、opacity .3），
+   否则编辑页卡片的半透明底会叠在「纯色 --bg」上，而详情页卡片叠在「--bg + 光晕」上，
+   两张卡片永远差 6~7% 的亮度与色相（这就是肉眼看到的「轻微色差」）。
+   z-index:-1：在 .page-sheet 这个层叠上下文里刚好落在「父背景之上、内容之下」，
+   不必给任何子元素补 z-index。 */
+.page-sheet::before {
+  content: ''; position: absolute; z-index: -1; pointer-events: none;
+  left: 0; top: 0; width: 100vmin; height: 100vmin; opacity: .3;
+  background: radial-gradient(circle at 50% 50%, var(--amb-1) 0%, var(--amb-2) 34%, transparent 68%);
 }
 .page-sheet-head {
   flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -991,10 +1024,17 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
   padding: 0;
 }
 
-/* ===== 编辑页横向三视图（图片 / 正文 / 步骤·计时）=====
+/* ===== 编辑页横向三视图（图片 / 正文 / 待办·计时）=====
    结构：.page-sheet-body > .ed-views（横向裁剪）> .ed-track > .ed-slot × 3 > .ed-card > .ed-scroll
-   几何：卡片在 slot 内左右各让 --ed-edge，槽间距 --ed-gap，
-        所以「静止时露出的邻卡宽度 = --ed-edge − --ed-gap」（默认 10 − 4 = 6px）。
+   几何：卡片左右各让 16px（与详情页 .view 的 --page-pad 完全一致，卡片宽度才能和详情页卡片
+        逐像素相同：W − 32），槽间距 --ed-gap = 4px，所以「静止时露出的邻卡宽度 = 16 − 4 = 12px」。
+   纵向：顶部 0 —— 卡片上沿贴齐正文区，与详情页卡片的顶部位置一致；
+        底部 16px —— 这是卡片自身投影（0 4px 14px）的落脚区。卡片依旧 height:100% 填满
+        可用高度，不是「为了露阴影把卡片缩短」，而是让投影落在 overflow:clip 之内，
+        否则下沿会被整条裁成硬边。
+        历史坑：20261117d 曾把卡片贴到裁剪边界、再在 .ed-dock 里画一条 24px 渐变「接住」
+        投影，结果是一条凭空出现的直边黑影 —— 阴影只能由卡片自己画。
+        另一坑：给上下都留白（10/12px）会让三张卡在不同视图里高度观感不一，只留底部这一处。
    三张卡常驻 DOM，只用 transform 移动 —— 这是「切视图不丢状态」的实现基础，
    任何时候都不要改成 display 切换或 innerHTML 重建（会丢滚动位置、丢光标、丢计时）。
    注意：轨道常驻 transform，所以它内部绝不能放 position:fixed 的东西
@@ -1007,7 +1047,12 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
   /* clip 而不是 hidden：clip 只裁剪、不创建滚动容器，内部 .ed-scroll 的纵向滚动
      与 .ed-dock-tools 的横向滑动都不会被压死（与 base.css 里 overflow-x:clip 同一理由） */
   overflow: clip;
-  padding: 0 var(--ed-edge, 10px);
+  /* 左右 16 = 详情页 .view 的 --page-pad；底下 16 = 卡片自身投影的落脚处：
+     box-shadow 是 0 4px 14px —— 下移 4 + 模糊 14，视觉上大约 16px 内走完。
+     卡片仍然 height:100% 贴满剩余空间，但这 16px 让它的投影完整落在 overflow:clip 里面。
+     【不要再改回上下 0】上一个版本试过「卡片贴边 + 在底栏里画一条渐变接住投影」，
+     结果就是底栏凭空多出一片直边黑影 —— 阴影必须由卡片自己画，容器只负责别裁掉它。 */
+  padding: 0 16px 16px;
   box-sizing: border-box;
   touch-action: pan-y;          /* 纵向交还系统，横向留给切换手势 */
 }
@@ -1020,11 +1065,15 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 .ed-card {
   position: relative; height: 100%; box-sizing: border-box;
   display: flex; flex-direction: column;
-  border-radius: 14px; overflow: hidden;
-  /* 绝不用 backdrop-filter：三张卡各叠一层模糊、里面还在滚 textarea，中低端机直接掉帧 */
-  background: var(--bg-2);
+  border-radius: var(--radius); overflow: hidden;
+  /* 与详情页 .card 同源：半透明底 + 顶部 5.5% 高光渐变，叠在 .page-sheet 的
+     「--bg + 环境光晕」上 —— 两层合成方式一模一样，卡片颜色才对得上（不再用实色 --bg-2）。
+     但仍然不加 backdrop-filter：三张卡各叠一层模糊、里面还在滚内容，中低端机直接掉帧；
+     详情页那层模糊是「锦上添花」，少了它色差 < 2%。 */
+  background: var(--card-bg, var(--surface));
+  background-image: linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0) 52%);
   border: 1px solid var(--border);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, .16);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .20);
   contain: paint;
   transition: transform .28s cubic-bezier(.22,.7,.28,1), opacity .28s;
 }
@@ -1047,6 +1096,14 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
    不计入可滚高度，滚到底时最后一行会正好压到卡片边缘、被悬浮胶囊盖住。
    所以正文卡把让位改成 textarea 自己的内边距（元素内的 padding 一定算进 scrollHeight）。 */
 .ed-scroll[data-ed-scroll] { display: flex; flex-direction: column; padding-bottom: 0; }
+
+/* 正文卡的滚动区：左右 16px = 详情页 .card 的 padding 16px，而卡片本身的左右外边距也是 16
+   （.ed-views 的 padding），于是「正文/标题左边界 = 16 + 1 边框 + 16 = 33px」，
+   与详情页 .detail-desc 逐像素重合，换行点也一致 —— 这就是「所见即所得」的唯一算法。
+   顶部 8 是标题与正文之间的呼吸（原来靠 .ed-text-head 那条 1px 分割线撑着，线已删）。
+   底部保持 0：24px 让位由 .ed-doc / .ed-desc 自己承担（flex 列滚动容器的 padding-bottom
+   在部分内核里不计入可滚高度，见上方注释）。 */
+.ed-card--text .ed-scroll[data-ed-scroll] { padding: 8px 16px 0; }
 
 /* 视图切换胶囊：住在页面最底部那一行（.ed-dock-pill）里。
    演进：43px 标签行 → 卡片底部悬浮 38px 胶囊 → 贴底 26px 迷你胶囊。
@@ -1086,10 +1143,12 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 /* 正文卡的固定头部：只有标题（原来还有一行待办摘要，20261117a 删了）。
    正文滚多长它都不动，所以「标题永远在」这件事不靠 sticky，不会跟滚动容器抢手势。 */
 .ed-text-head {
-  flex: 0 0 auto; padding: 8px 8px 8px;
-  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto; padding: 8px 16px 4px;
+  /* 这里原来有一条 border-bottom（标题与正文的分割线）。已删除：
+     详情页标题与正文之间本来就没有线，只在中间隔一行分类/日期，编辑页有线才显得「两块」。
+     分割线撤掉后标题与正文的呼吸全靠 padding（4 + 8 + 8 = 20px）撑着。 */
 }
-.ed-text-head .ed-title { padding: 0 0 8px; }
+.ed-text-head .ed-title { padding: 6px 0 8px; }
 .ed-text-head .ed-desc-wrap { margin: 0; }
 
 
@@ -1123,19 +1182,34 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
   text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   -webkit-tap-highlight-color: transparent;
 }
-.step-dur { flex: 0 0 auto; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-dim); }
+.step-dur { flex: 0 0 auto; font-size: calc(var(--font-scale, 1) * 12px); font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-dim); }
 .step-more { flex: 0 0 auto; width: 28px; height: 28px; color: var(--text-dim); }
 .step-segs { margin: 8px 0 0 30px; display: flex; flex-direction: column; gap: 4px; }
-.seg-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); }
-.seg-time { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
-.seg-row.is-live .seg-time { color: var(--accent); font-weight: 800; }
+/* 计时段一行：时刻（可点改起止）+ 备注（可点改，可换行）+ 耗时 + 删除。
+   字号必须带 --font-scale：备注是正文性文字，用户调全局字号时必须跟着变；
+   同一行的时刻 / 耗时一起走，否则 1.3 档下会出现「备注 15.6px、时刻 12px」的错位。 */
+.seg-row { display: flex; align-items: flex-start; gap: 8px; font-size: calc(var(--font-scale, 1) * 12px); color: var(--text-dim); }
+/* 时刻是按钮（点它改起止）：复位 button 默认外观，只留一条虚线暗示「可以点」。
+   注意 font:inherit 会重置 font-variant，所以 tabular-nums 必须写在它后面。 */
+.seg-time {
+  flex: 0 0 auto; padding: 0; border: 0; border-bottom: 1px dashed var(--border);
+  background: transparent; color: inherit; font: inherit;
+  font-variant-numeric: tabular-nums; white-space: nowrap; text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+.seg-time:active { color: var(--accent); border-bottom-color: var(--accent); }
+.seg-row.is-live .seg-time { color: var(--accent); font-weight: 800; border-bottom-color: var(--accent-soft); }
 .seg-note {
   flex: 1 1 auto; min-width: 0; padding: 0; border: 0; background: transparent;
-  font-family: inherit; font-size: 12px; color: var(--text-dim); text-align: left;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: inherit; font-size: calc(var(--font-scale, 1) * 12px); color: var(--text-dim); text-align: left;
+  /* 备注不再省略：长备注整段换行显示（原 nowrap + ellipsis 会把内容吃掉） */
+  white-space: normal; overflow: visible; text-overflow: clip;
+  word-break: break-word; overflow-wrap: anywhere; line-height: 1.5;
   -webkit-tap-highlight-color: transparent;
 }
 .seg-note:active { color: var(--accent); }
+/* 每段耗时（时:分:秒）：比时刻小半号，不跟左边的时间抢注意力 */
+.seg-dur { flex: 0 0 auto; font-size: calc(var(--font-scale, 1) * 11.5px); font-variant-numeric: tabular-nums; color: var(--text-dim); opacity: .9; white-space: nowrap; }
 .seg-del { flex: 0 0 auto; width: 22px; height: 22px; color: var(--text-dim); opacity: .65; }
 .step-actions { display: flex; gap: 8px; margin: 8px 0 0 30px; }
 .step-timer {
@@ -1153,9 +1227,13 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
    复用编辑页的 .step-top / .step-chk / .step-dur / .step-segs / .seg-row，
    这里只补「块级外壳」和「只读的步骤名 / 分段备注」。 */
 .detail-steps { margin: 16px 0 2px; padding-top: 12px; border-top: 1px solid var(--border); }
+/* 没有任何待办：整块不出现（不是一个「还没有待办」的空壳 + 一条分割线）。
+   这里是「有没有待办」决定的显隐，不是每帧切换，用 display 不存在跳动问题。
+   要新增待办请进编辑页的「待办」视图 —— 详情页不承担这个入口。 */
+.detail-steps.is-empty { display: none; }
 .dst-head { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
 .dst-title { font-size: calc(var(--font-scale, 1) * 13.5px); font-weight: 800; color: var(--text); }
-.dst-sum { margin-left: auto; font-size: calc(var(--font-scale, 1) * 12px); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.dst-sum { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; font-size: calc(var(--font-scale, 1) * 12px); color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dst-head .steps-add { flex: 0 0 auto; width: 28px; height: 28px; }
 .dst-list { display: flex; flex-direction: column; gap: 8px; }
 .dst-step { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 10px; }
@@ -1169,10 +1247,12 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 .dst-step .step-segs + .dst-acts { margin-left: 0; }
 .dst-acts .step-timer { height: 26px; padding: 0 10px; font-size: calc(var(--font-scale, 1) * 12px); }
 .dst-acts .step-timer.is-fin { color: var(--accent); border-color: var(--accent); }
-/* 分段备注：可点即改（原来只读），样式与编辑页 .seg-note 对齐 */
+/* 分段备注：可点即改（原来只读），样式与编辑页 .seg-note 对齐
+   —— 包括「长备注换行不省略」和「字号跟 --font-scale 走」这两条。 */
 .seg-note-ro {
-  flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--text-dim);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1 1 auto; min-width: 0; font-size: calc(var(--font-scale, 1) * 12px); color: var(--text-dim);
+  overflow: visible; text-overflow: clip; white-space: normal;
+  word-break: break-word; overflow-wrap: anywhere; line-height: 1.5;
   text-align: left; background: transparent; border: 0; padding: 0;
   font-family: inherit; -webkit-tap-highlight-color: transparent;
 }
@@ -1193,8 +1273,10 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
    但仍被 popmenu(70)/toast(80) 盖住，弹菜单/提示时不会挡住操作。 */
 .tmwin {
   position: fixed; z-index: 55; left: 0; top: 0;
-  width: 148px; box-sizing: border-box;
-  padding: 6px 8px 7px;
+  /* 132：顶行只剩「时钟 + 暂停 + 收起」，放大挪到底行右侧（备注右边），
+     所以这一格不需要再留 148。宽度账见下方 .tmwin-sub 的注释。 */
+  width: 132px; box-sizing: border-box;
+  padding: 6px 7px 7px;
   border-radius: 14px;
   background: var(--bg-2); border: 1px solid var(--border);
   box-shadow: 0 10px 28px rgba(0, 0, 0, .30), 0 1px 3px rgba(0, 0, 0, .18);
@@ -1215,12 +1297,14 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 .tmwin.mini .tmwin-sp,
 .tmwin.mini .tmwin-btn,
 .tmwin.mini .tmwin-sub { display: none; }
-.tmwin-top { display: flex; align-items: center; gap: 6px; }
-.tmwin-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; animation: gtPulse 1.6s ease-in-out infinite; }
-.tmwin-clock { font-variant-numeric: tabular-nums; font-weight: 800; font-size: calc(var(--font-scale, 1) * 14px); }
+.tmwin-top { display: flex; align-items: center; gap: 4px; }
+/* 展开态也只在折叠态露那颗装饰点（空间留给按钮）：折叠态是「● 00:03」，点它才够「在跑」的脉动感。 */
+.tmwin-dot { display: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; animation: gtPulse 1.6s ease-in-out infinite; }
+.tmwin.mini .tmwin-dot { display: inline-block; }
+.tmwin-clock { font-variant-numeric: tabular-nums; font-weight: 800; font-size: calc(var(--font-scale, 1) * 13px); }
 .tmwin-sp { flex: 1 1 auto; }
 .tmwin-btn {
-  flex: 0 0 auto; width: 24px; height: 24px; border: 0; border-radius: 8px;
+  flex: 0 0 auto; width: 22px; height: 22px; border: 0; border-radius: 7px;
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--surface-2); color: var(--text-dim);
   font-family: inherit; font-size: 15px; font-weight: 700; line-height: 1;
@@ -1228,13 +1312,18 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
   -webkit-tap-highlight-color: transparent;
 }
 .tmwin-btn:active { background: var(--accent-soft); color: var(--accent); }
-.tmwin-sub { display: flex; align-items: center; gap: 6px; margin-top: 4px; min-width: 0; }
+/* 宽度账（132 − 2 边框 − 16 padding = 114）：
+   顶行 时钟 38 + 暂停 22 + 收起 22 + 2×4 gap = 90；
+   底行 待办名(吃剩下的 ~46) + 3 + 备注(≤44) + 3 + 放大 22 = 116。
+   「加备注」三个字实占 43.5，所以空态不会被压成省略号；名字超了就省略号。 */
+.tmwin-sub { display: flex; align-items: center; gap: 3px; margin-top: 4px; min-width: 0; }
 .tmwin-name {
   flex: 1 1 auto; min-width: 0; font-weight: 700;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .tmwin-note {
-  flex: 0 0 auto; max-width: 56px; padding: 2px 7px;
+  /* 48（不参与收缩）：这是颗按钮，宁可让待办名省略，也不要把「加备注」压成「加备…」 */
+  flex: 0 0 auto; max-width: 44px; padding: 2px 6px;
   border: 0; border-radius: 999px; background: var(--surface);
   color: var(--text-dim); font-family: inherit;
   font-size: calc(var(--font-scale, 1) * 10.5px);
@@ -1243,6 +1332,84 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 }
 .tmwin-note.is-empty { opacity: .78; }
 .tmwin-note:active { color: var(--accent); }
+
+/* ===== 专注计时页（FocusTimer，挂 body）=====
+   从计时小窗的「放大」进入，全屏接管；小窗在此期间由 App.records.setFocusMode 收掉。
+   层级 53：压住 nav(30)/fab(40)/batch(45) 与整个编辑页 .page-sheet(50) ——
+     从编辑页里点「放大」进来时，专注页必须是看得见的那一层（46 会/edit 页反压住，等于点了没反应）。
+     仍低于 .tmwin(55)、弹窗(56)、popmenu(70)、toast(80)：专注期间小窗由 setFocusMode 收掉，
+     toast 与确认框要能盖在专注页上面。
+   显隐不用 display：与 .tmwin 同理，先算好再亮，避免首帧闪一下。 */
+.focus-page {
+  position: fixed; inset: 0; z-index: 53;
+  display: flex; flex-direction: column;
+  padding: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 10px) 24px
+           calc(env(safe-area-inset-bottom, 0px) + 26px);
+  background: var(--bg);
+  color: var(--text);
+  box-sizing: border-box;
+  visibility: hidden; opacity: 0;
+  transition: opacity .18s ease;
+  -webkit-user-select: none; user-select: none;
+}
+.focus-page.on { visibility: visible; opacity: 1; }
+/* 一层极淡的环境光，专注页不至于是一块死平的黑；参数与 body::before 同源 */
+.focus-page::before {
+  content: ''; position: absolute; z-index: -1; pointer-events: none;
+  left: 50%; top: 38%; width: 118vmin; height: 118vmin;
+  transform: translate(-50%, -50%); opacity: .3;
+  background: radial-gradient(circle at 50% 50%, var(--amb-1) 0%, var(--amb-2) 40%, transparent 70%);
+}
+.fp-close {
+  position: absolute; left: 10px;
+  top: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 4px);
+  color: var(--text-dim);
+}
+.fp-center {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 16px;
+}
+/* 圆环：SVG 自身旋转 -90°，让弧线从 12 点开始走 */
+.fp-ring { position: relative; width: 232px; height: 232px; flex: 0 0 auto; }
+.fp-ring svg { display: block; width: 100%; height: 100%; transform: rotate(-90deg); }
+.fp-arc-bg { stroke: var(--accent); opacity: .16; }
+.fp-arc { stroke: var(--accent); transition: stroke-dashoffset .45s linear, stroke .2s ease; }
+.focus-page.is-paused .fp-arc { stroke: var(--text-dim); transition: none; }
+/* 时钟压在圆环正中间：绝对定位，不吃圆环的布局 */
+.fp-clock {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: calc(var(--font-scale, 1) * 44px); font-weight: 800;
+  font-variant-numeric: tabular-nums; letter-spacing: -1px;
+  pointer-events: none;
+}
+.fp-name {
+  max-width: 100%; text-align: center;
+  font-size: calc(var(--font-scale, 1) * 19px); font-weight: 700;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fp-note {
+  max-width: 100%; padding: 4px 12px; border: 0; border-radius: 999px;
+  background: var(--surface); color: var(--text-dim);
+  font-family: inherit; font-size: calc(var(--font-scale, 1) * 12.5px);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+.fp-note.is-empty { opacity: .7; }
+.fp-note:active { color: var(--accent); }
+.fp-foot { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.fp-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 48px; padding: 0 26px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface-2); color: var(--text);
+  font-family: inherit; font-size: calc(var(--font-scale, 1) * 15px); font-weight: 700;
+  -webkit-tap-highlight-color: transparent;
+}
+.fp-btn:active { background: var(--accent-soft); color: var(--accent); }
+.fp-btn[disabled] { opacity: .55; }
+.fp-btn-ic { display: inline-flex; }
+.fp-state { font-size: calc(var(--font-scale, 1) * 11.5px); color: var(--text-dim); letter-spacing: .05em; }
 
 /* ===== 编辑页 Markdown 排版栏（.ed-dock，取代原底部「取消 / 保存」栏）=====
    出现时机：正文聚焦才显示（.is-open），失焦 / 点到别处 180ms 后收起 —— 不常驻占屏。
@@ -1254,15 +1421,24 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
   flex: 0 0 auto; position: relative; z-index: 8;
   box-sizing: border-box; height: 29px;
   margin: 0; padding: 0;
-  background: var(--bg);
+  /* 透明，不是实色：卡片下面那 16px 留白与这里透出的都是 .page-sheet 的 --bg，
+     同色所以没有接缝。卡片自身的投影落在 .ed-views 的 16px padding 里，不靠这条画。 */
+  background: transparent;
   border-top: 0;                      /* 常态放胶囊时不画线，免得底部多一条常驻分割线 */
   visibility: visible; opacity: 1; pointer-events: auto;   /* 这一行现在永远有内容（胶囊） */
   transition: bottom .16s ease-out;
 }
+/* 排版栏展开时卡片不再贴到这条线上（中间隔着 16px 留白），需要一条分隔线划清边界。
+   box-sizing:border-box，29px 不变 —— pinScroll / ensureCaret / visibleBottom 都按 29 算。 */
 .ed-dock.is-open { border-top: 1px solid var(--border); }
 /* 键盘是 adjustPan / 悬浮键盘时（视口没变矮）整条浮到键盘上沿 */
 .ed-dock.is-floating {
   position: fixed; left: 0; right: 0; bottom: 0;
+  /* 浮起时这条压在正文上（.page-sheet-body 当帧高了 29px，见 records.js 的 paddingBottom 补丁），
+     所以必须把底子补回来，否则正文文字会从按钮缝里透出来。 */
+  background: var(--bg-alpha, rgba(21, 23, 28, .88));
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
   box-shadow: 0 -8px 24px rgba(0, 0, 0, .28);
 }
 
@@ -1270,7 +1446,7 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
    叠放（而不是上下排）是为了「换内容不换高度」—— 高度一变，浏览器就会把光标
    重新滚进可视区，那就是「点一下正文整页跳一下」。 */
 .ed-dock-pill {
-  position: absolute; inset: 0;
+  position: absolute; inset: 0; z-index: 1;
   display: flex; align-items: center; justify-content: center;
   padding: 0 max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right));
   transition: opacity .16s ease;      /* 只过渡 opacity：visibility 若参与过渡，低帧率时会把值卡在旧状态 */
@@ -1279,7 +1455,7 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 
 /* 按钮行：横向滑动，绝不换行、不压缩按钮 */
 .ed-dock-tools {
-  position: absolute; inset: 0;
+  position: absolute; inset: 0; z-index: 1;
   min-width: 0;
   display: flex; align-items: center; gap: 0;
   overflow-x: auto; overflow-y: hidden;
@@ -1358,7 +1534,7 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
    正文视图整屏都是文字，输入框必须撑满剩下的高度（点卡片下半部分也能开始打字），
    所以这一层是 flex column 的弹性项，textarea 在它里面 flex-grow。 */
 .ed-desc-wrap {
-  position: relative; margin: 12px 0 0;
+  position: relative; margin: 0;
   flex: 1 1 auto; min-height: 0;
   display: flex; flex-direction: column;
 }
@@ -1373,8 +1549,9 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
   /* 与详情页正文保持完全一致的排版（只对齐编辑态，不动详情样式）：
      · 字号 1rem：详情正文继承 body 的 1rem(16px)，编辑框同值才能「每行字数」一致；
      · 行高 1.78：详情生效的是 .md-body 的 line-height:1.78（同在元素上的 .detail-desc 的 1.7 被覆盖）；
-     · 左右内边距 17px：详情正文左起 = .view 16 + 卡片边框 1 + 卡片内边距 16 = 33px，
-       编辑页左起 = .page-sheet-body 16 + 17 = 33px；内容宽两边都 = 屏宽 − 66，换行点相同；
+     · 左右内边距 0：左边界全部由外层决定 —— 16（.ed-views）+ 1（卡片边框）+ 16
+       （.ed-card--text 的 .ed-scroll）= 33px，与详情页 .detail-desc 完全同值，
+       可用宽度两边都是 屏宽 − 66，换行点逐字一致；
      · text-size-adjust:none 关掉安卓字体自动放大，防止行高被重算。 */
   font-size: 1rem;
   line-height: 1.78;
@@ -1385,20 +1562,17 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
      这个让位放在 textarea 自己的 padding 上（而不是外层滚动容器），
      因为元素内的 padding 一定计入 scrollHeight —— 外层 flex 滚动容器的 padding-bottom
      在部分内核里不计入可滚高度，滚到底时最后一行会贴到卡片边缘。 */
-  /* 左右 6px（原来 17px）：外层 .ed-scroll 已有 14px，加起来 20px ——
-     标题也在 20px 上（.ed-text-head 6px + .ed-title 0），文字与卡片边框之间不再显得空。
-     代价是与详情页的换行点不再逐字一致（可用宽度 +22px），优先照顾「编辑时看着不空」。 */
-  padding: 6px 2px 24px; outline: none; resize: none; overflow: hidden; display: block;
+  padding: 0 0 24px; outline: none; resize: none; overflow: hidden; display: block;
 }
 .ed-desc::placeholder { color: var(--text-dim); }
 
 /* ===== 即时 Markdown（块级渲染层 .ed-doc）=====
    正文容器里「要么是整篇 textarea，要么是这块渲染层」，由 .ed-desc-wrap[data-mode] 决定。
-   排版口径与 .ed-desc 完全一致（字号 1rem / 行高 1.78 / 左右 6px / 底部 24px 让位），
+   排版口径与 .ed-desc 完全一致（字号 1rem / 行高 1.78 / 左右 0 / 底部 24px 让位），
    所以从源码模式切到即时模式，每行位置基本不动。 */
 .ed-doc {
   flex: 1 0 auto; min-height: 0;
-  padding: 6px 2px 24px;
+  padding: 0 0 24px;
   box-sizing: border-box;
   font-size: 1rem; line-height: 1.78;
   -webkit-text-size-adjust: none; text-size-adjust: none;

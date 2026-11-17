@@ -300,6 +300,17 @@ App.records = (function () {
     return box;
   }
 
+  // 待办进度徽标：▢3/5 ⇄ ☑5/5（全部完成时方框填强调色）。
+  // 方框用 CSS 画、对勾用 svg —— 旧 WebView 的中文字体常缺 U+25A2 / U+2611，直接写 ▢ 会变豆腐块。
+  // 列表卡片与详情页待办块共用这一个构造器，两处的形状、字号口径才不会漂。
+  function progBadge(done, total, cls) {
+    const all = total > 0 && done >= total;
+    const el = U().el('span', { class: 'prog' + (all ? ' is-all' : '') + (cls ? ' ' + cls : '') });
+    el.appendChild(U().el('span', { class: 'prog-box', html: all ? U().icon('check', 9) : '' }));
+    el.appendChild(U().el('span', { class: 'prog-num', text: done + '/' + total }));
+    return el;
+  }
+
   function recordCard(rec, domain) {
     const card = U().el('div', { class: 'record-card' + (multiMode ? ' selectable-card' : '') });
     // 封面：无论几张图，只取第一张铺满卡片（绝不拼接 / 分屏）
@@ -351,10 +362,15 @@ App.records = (function () {
     // 排版说明（瀑布流）：
     // ① 分类/标签行固定只占一行（CSS 里 nowrap + 定高 + 裁切），换行不再撑高卡片；
     // ② 日期放在正文最后；卡片高度由内容决定，两列各自堆叠、互不拉伸（见 .gallery.masonry）。
-    // 卡片脚注：左边日期、右边字数，同一行两端对齐 —— 所有卡片的字数都压在右下角，
-    // 扫列表时位置固定、成列，不会随标题长短跳来跳去（rc-foot 用 margin-top:auto 顶到底）。
+    // 卡片脚注：左边日期、中间待办进度（有才出）、右边字数，一行三元素两端对齐 ——
+    // 所有卡片的字数都压在右下角，扫列表时位置固定、成列，不会随标题长短跳来跳去。
+    // 进度徽标只对「有待办」的记录出现：没待办的卡片不该多一个字。
+    const stList = rec.steps || [];
+    const stTotal = stList.length;
+    const stDone = stTotal ? stList.filter((s) => s.done).length : 0;
     const foot = U().el('div', { class: 'rc-foot' },
       U().el('span', { class: 'rc-date', text: U().fmtDate(rec.date || rec.createdAt) }),
+      stTotal ? progBadge(stDone, stTotal, 'rc-prog') : null,
       descCount > 0 ? U().el('span', { class: 'rc-count', text: descCount + ' 字' }) : null);
     body = U().el('div', { class: 'rc-body' },
       titleEl,
@@ -979,7 +995,7 @@ App.records = (function () {
   function placeTimerWin(pos, animate) {
     if (!timerWin) return pos;
     const el = timerWin.el;
-    const w = el.offsetWidth || 176, h = el.offsetHeight || 64;
+    const w = el.offsetWidth || 132, h = el.offsetHeight || 60;
     const side = pos.side === 'left' ? 'left' : 'right';
     const left = side === 'left' ? TMWIN_M : (window.innerWidth - w - TMWIN_M);
     const maxTop = Math.max(TMWIN_M, (window.innerHeight || 640) - navReserve() - h);
@@ -1022,21 +1038,30 @@ App.records = (function () {
     const el = U().el('div', { class: 'tmwin' });
     const clock = U().el('span', { class: 'tmwin-clock', text: '00:00' });
     const pause = U().el('button', { class: 'tmwin-btn', type: 'button', html: U().icon('pause', 14), title: '暂停' });
-    // 「−」折叠：只显示时钟，把 176px 的窗子收成一颗小胶囊
+    // 放大：进专注计时页（全屏 FocusTimer），进去后小窗隐藏
+    const focusBtn = U().el('button', { class: 'tmwin-btn is-focus', type: 'button', html: U().icon('expand', 13), title: '专注计时' });
+    // 「−」折叠：只显示时钟，把窗子收成一颗小胶囊
     const minus = U().el('button', { class: 'tmwin-btn is-min', type: 'button', text: '−', title: '收起' });
     pause.setAttribute('aria-label', '暂停');
+    focusBtn.setAttribute('aria-label', '进入专注计时');
     minus.setAttribute('aria-label', '收起计时窗');
+    // 顶行只放「时钟 + 暂停 + 收起」；放大按钮挪到底行最右（备注右边），见 sub
     const topRow = U().el('div', { class: 'tmwin-top' },
       U().el('span', { class: 'tmwin-dot' }), clock, U().el('span', { class: 'tmwin-sp' }), pause, minus);
     const name = U().el('span', { class: 'tmwin-name' });
     const note = U().el('button', { class: 'tmwin-note', type: 'button' });
-    const sub = U().el('div', { class: 'tmwin-sub' }, name, note);
+    const sub = U().el('div', { class: 'tmwin-sub' }, name, note, focusBtn);
     el.appendChild(topRow); el.appendChild(sub);
     document.body.appendChild(el);
 
     pause.addEventListener('click', async () => {
       await App.timer.stop();
       U().toast('已暂停', 'ok');          // 订阅会把小窗收掉
+    });
+    focusBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (App.focus && App.focus.open) App.focus.open();
+      else U().toast('专注页未就绪', 'err');
     });
     minus.addEventListener('click', (e) => { e.stopPropagation(); setTimerWinMini(true, true); });
     clock.addEventListener('click', () => { if (timerWinMini) setTimerWinMini(false, true); });
@@ -1056,6 +1081,7 @@ App.records = (function () {
     // 拖拽：touch（不用 Pointer Events —— 系统会抢 pointercancel）。
     // 6px 阈值：手指只是点一下时仍然算点击，不会把「暂停」点成拖动。
     let drag = null;
+    let tapMoved = false;      // 上一次手指抬起是不是「拖」结束的（拖完不能算点击）
     el.addEventListener('touchstart', (e) => {
       if (e.touches.length !== 1) return;
       const t = e.touches[0];
@@ -1081,8 +1107,9 @@ App.records = (function () {
       if (!drag) return;
       const moved = drag.moved;
       drag = null;
+      tapMoved = moved;                          // 交给下面的 click 守卫：拖完不算点
       el.classList.remove('dragging');
-      if (!moved) return;                       // 点按：交给按钮自己的 click
+      if (!moved) return;                        // 点按：交给按钮自己的 click
       const side = (el.offsetLeft + el.offsetWidth / 2) < window.innerWidth / 2 ? 'left' : 'right';
       const pos = placeTimerWin({ side: side, y: el.offsetTop }, true);
       if (timerWin) timerWin.pos = pos;
@@ -1091,6 +1118,18 @@ App.records = (function () {
     }
     el.addEventListener('touchend', endDrag);
     el.addEventListener('touchcancel', endDrag);
+
+    // 点小窗本体（没点到任何按钮）→ 跳到这条记录的详情页。
+    // 三重守卫：① 折叠态交给 clock 的「展开」；② 刚拖过的一下不算点；③ 按钮自己的 click 已处理。
+    el.addEventListener('click', (e) => {
+      if (timerWinMini) return;
+      if (tapMoved) { tapMoved = false; return; }
+      if (e.target && e.target.closest && e.target.closest('button')) return;
+      const c = timerWin && timerWin.ctx;
+      if (!c || !c.recId) return;
+      if ((location.hash || '') === '#/record/' + c.recId) return;   // 已经在这条详情页
+      App.app.go('record/' + c.recId);
+    });
 
     const onResize = () => { if (timerWin) timerWin.pos = placeTimerWin(timerWin.pos || timerWinPos || { side: 'right', y: 80 }, false); };
     window.addEventListener('resize', onResize);
@@ -1137,9 +1176,18 @@ App.records = (function () {
     return null;
   }
 
+  // 专注页打开期间：小窗必须让位（专注页本身就是全屏计时，再飘一颗窗子重复且挡视线）。
+  // 由 App.focus 通过 setFocusMode 置位；关页时复位并立刻重画一次，还在跑的话窗子自己回来。
+  let focusMode = false;
+  function setFocusMode(on) {
+    focusMode = !!on;
+    if (focusMode) { closeTimerWin(); return; }
+    try { paintTimerWin(App.timer ? App.timer.state() : null); } catch (_) {}
+  }
+
   function paintTimerWin(st) {
     const live = !!(st && st.running);
-    if (!live) { closeTimerWin(); return; }
+    if (!live || focusMode) { closeTimerWin(); return; }
     const w = ensureTimerWin();
     w.ctx = { recId: st.recId, stepId: st.stepId, segId: st.segId };
     w.clock.textContent = U().fmtClock(st.elapsedSec);          // 每秒只有这一行变
@@ -1426,6 +1474,39 @@ App.records = (function () {
         paintStepsBlock();
       });
     }
+    function dEditSegTime(s, g) {
+      openSegTime(g, async (st, en) => {
+        try {
+          await patchSteps((list) => {
+            const t = list.find((x) => x.id === s.id);
+            const sg = t && (t.segs || []).find((y) => y.id === g.id);
+            if (!sg) return false;
+            sg.start = st;
+            if (en != null) sg.end = en;
+          });
+        } catch (e) { dFail(); return; }
+        paintStepsBlock();
+      });
+    }
+    function dDeleteSeg(s, g) {
+      U().confirmDialog('删除这一段计时（' + U().fmtHMS(segSec(g)) + '）？', { okLabel: '删除', danger: true }).then(async (ok) => {
+        if (!ok) return;
+        // 正在跑的那一段必须先把表停掉再摘：反过来会留下 end=null 的悬挂段，
+        // 下次启动时 timer.init() 按 0 秒收口，这段时长就凭空消失了。
+        const st = App.timer ? App.timer.state() : { running: false };
+        if (st.running && st.segId === g.id) { try { await App.timer.stop(); } catch (_) {} }
+        try {
+          await patchSteps((list) => {
+            const t = list.find((x) => x.id === s.id);
+            if (!t || !Array.isArray(t.segs)) return false;
+            const i = t.segs.findIndex((y) => y.id === g.id);
+            if (i < 0) return false;
+            t.segs.splice(i, 1);
+          });
+        } catch (e) { dFail(); return; }
+        paintStepsBlock();
+      }).catch(() => {});
+    }
     async function dToggleTimer(s) {
       if (!App.timer) return;
       const st = App.timer.state();
@@ -1485,16 +1566,22 @@ App.records = (function () {
         segs.forEach((g) => {
           const liveSeg = g.end == null;
           const line = U().el('div', { class: 'seg-row' + (liveSeg ? ' is-live' : '') });
+          // 与编辑页同一套：时刻可点改起止，已结束的段补「时:分:秒」耗时，行尾可删
+          const time = U().el('button', { class: 'seg-time', type: 'button', title: '修改起止时间' });
           if (liveSeg) {
-            const clock = U().el('span', { class: 'seg-time' });
-            bindDNum(clock, () => segSec(g));
-            clock.classList.add('is-clock');   // 与编辑页同义：带这个类 = 正在走的时钟
-            line.appendChild(clock);
-          } else line.appendChild(U().el('span', { class: 'seg-time', text: hmLabel(g.start) + '–' + hmLabel(g.end) }));
+            bindDNum(time, () => segSec(g));
+            time.classList.add('is-clock');   // 与编辑页同义：带这个类 = 正在走的时钟
+          } else time.textContent = hmLabel(g.start) + '–' + hmLabel(g.end);
+          time.addEventListener('click', () => dEditSegTime(s, g));
+          line.appendChild(time);
           // 备注从「只读文字」改成可点即改：小窗上也能改，两边同一个入口语义
           const noteBtn = U().el('button', { class: 'seg-note-ro', type: 'button', text: g.note || '加备注' });
           noteBtn.addEventListener('click', () => dEditSegNote(s, g));
           line.appendChild(noteBtn);
+          if (!liveSeg) line.appendChild(U().el('span', { class: 'seg-dur', text: U().fmtHMS(segSec(g)) }));
+          const del = U().el('button', { class: 'icon-btn seg-del', type: 'button', html: U().icon('x', 13), title: '删除这一段' });
+          del.addEventListener('click', () => dDeleteSeg(s, g));
+          line.appendChild(del);
           segsEl.appendChild(line);
         });
         row.appendChild(segsEl);
@@ -1506,6 +1593,16 @@ App.records = (function () {
     }
 
     function paintStepsBlock() {
+      // 一条待办都没有：整块不出现。空白态（「还没有待办…」+ 一条 1px 分割线 + 汇总位）
+      // 会白占一百多像素，对「本来就不写待办」的笔记毫无意义 —— 要加待办进编辑页加。
+      if (!dSteps().length) {
+        stepsBox.classList.add('is-empty');
+        U().clear(stepsBox);
+        dNums.length = 0;
+        dSumEl = null;
+        return;
+      }
+      stepsBox.classList.remove('is-empty');
       // 只清空这一块重画：不动 page / sheet / card，滚动位置天然保留
       U().clear(stepsBox);
       dNums.length = 0;
@@ -1515,24 +1612,39 @@ App.records = (function () {
       add.addEventListener('click', (e) => { e.stopPropagation(); dAddStep(); });
       dSumEl = U().el('span', { class: 'dst-sum' });
       stepsBox.appendChild(U().el('div', { class: 'dst-head' },
-        U().el('span', { class: 'dst-title', text: '待办与用时' }), dSumEl, add));
+        U().el('span', { class: 'dst-title', text: '待办计时' }), dSumEl, add));
       const listEl = U().el('div', { class: 'dst-list' });
-      if (!list.length) listEl.appendChild(U().el('div', { class: 'steps-empty', text: '还没有待办。点右上角「+」加一条，就能给它分段计时。' }));
       list.forEach((s) => listEl.appendChild(buildDetailStep(s)));
       stepsBox.appendChild(listEl);
       paintDNums();                    // 画完立刻同步一次，绝不等下一秒
     }
     function paintDNums() {
       for (let i = 0; i < dNums.length; i++) {
-        try { dNums[i].el.textContent = U().fmtClock(dNums[i].fn()); } catch (_) {}
+        try { dNums[i].el.textContent = U().fmtHMS(dNums[i].fn()); } catch (_) {}
       }
       if (dSumEl) {
         const list = dSteps();
         // 一条都没有时不摆「0/0 · 0 分」这种废话，空态文案已经说清楚了
-        dSumEl.textContent = list.length
-          ? ('待办 ' + list.filter((s) => s.done).length + '/' + list.length
-            + ' · 总用时 ' + (U().fmtDuration(Math.round(recSec(rec) / 60)) || '0 分'))
-          : '';
+        if (!list.length) {
+          if (dSumEl.dataset.k !== '') { dSumEl.dataset.k = ''; U().clear(dSumEl); }
+        } else {
+          const done = list.filter((s) => s.done).length;
+          const total = list.length;
+          const k = done + '/' + total;
+          // 这个函数每秒都会被 tick 叫一次：只有「完成数」变了才重建徽标，
+          // 其余时间只改「总用时」那几个字 —— 否则每秒重建一次节点，列表会微微抖。
+          if (dSumEl.dataset.k !== k) {
+            dSumEl.dataset.k = k;
+            U().clear(dSumEl);
+            dSumEl.appendChild(progBadge(done, total));
+            dSumEl.appendChild(U().el('span', { class: 'dst-sum-time' }));
+          }
+          const timeEl = dSumEl.querySelector('.dst-sum-time');
+          if (timeEl) {
+            const txt = ' · 总用时 ' + (U().fmtDuration(Math.round(recSec(rec) / 60)) || '0 分');
+            if (timeEl.textContent !== txt) timeEl.textContent = txt;
+          }
+        }
       }
     }
 
@@ -1569,7 +1681,7 @@ App.records = (function () {
         paintDNums();
         const key = (st.running && st.recId === rec.id) ? st.segId : '';
         if (key !== lastKey) { lastKey = key; paintStepsBlock(); }
-        paintTimerWin(st, rec);          // 每秒只改小窗里的时钟
+        paintTimerWin(st);          // 每秒只改小窗里的时钟
       });
     }
 
@@ -1673,7 +1785,7 @@ App.records = (function () {
     page.appendChild(sheet);
     container.appendChild(page);
     mountDetailTick();                       // 进详情页才挂每秒刷新，离开时由 renderDetail/renderList 退订
-    paintTimerWin(App.timer ? App.timer.state() : null, rec);   // 重进详情页：表还在跑就把小窗挂回来
+    paintTimerWin(App.timer ? App.timer.state() : null);   // 重进详情页：表还在跑就把小窗挂回来
     // 挂到文档后才有真实宽度，此时再校正一次轮播高度（首帧不闪 4:3）
     if (carousel) { applyRatio(); requestAnimationFrame(applyRatio); }
 
@@ -1828,6 +1940,69 @@ App.records = (function () {
   function hmLabel(ts) {
     const d = new Date(Number(ts) || 0);
     return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+  // "9:05" / "09:05" / "9：05" → 当日分钟数；不合法 → null。
+  // 不写死两位：input[type=time] 在个别魔改 ROM 的 WebView 里会退化成普通文本框。
+  function parseHM(v) {
+    const m = /^(\d{1,2})\s*[:：]\s*(\d{1,2})$/.exec(String(v == null ? '' : v).trim());
+    if (!m) return null;
+    const h = Number(m[1]), mi = Number(m[2]);
+    return (h > 23 || mi > 59) ? null : h * 60 + mi;
+  }
+  // 在 baseTs 那一天上取 hh:mm 的绝对时间戳：只换时分，日期永远跟着原记录走
+  function tsOnDay(baseTs, minutes) {
+    const d = new Date(Number(baseTs) || Date.now());
+    d.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+    return d.getTime();
+  }
+  // 改一段计时的首尾时间（编辑页计时视图 / 详情页共用同一个弹窗）
+  // onSave(startTs, endTs|null)：endTs 为 null = 这段还在跑，调用方不要动它的 end。
+  function openSegTime(g, onSave) {
+    if (!g) return;
+    const live = g.end == null;
+    const stI = U().el('input', { class: 'input', type: 'time', step: '60' });
+    stI.value = hmLabel(g.start);
+    const enI = U().el('input', { class: 'input', type: 'time', step: '60' });
+    enI.value = live ? '' : hmLabel(g.end);
+    if (live) enI.disabled = true;
+    const dimStyle = { color: 'var(--text-dim)', fontSize: 'calc(var(--font-scale, 1) * 12.5px)', lineHeight: '1.6' };
+    const err = U().el('div', {
+      style: {
+        color: 'var(--danger)', fontSize: 'calc(var(--font-scale, 1) * 12.5px)',
+        lineHeight: '1.6', minHeight: 'calc(var(--font-scale, 1) * 20px)',
+      },
+    });
+    const body = U().el('div', {},
+      U().el('div', { class: 'field' }, U().el('label', { text: '开始' }), stI),
+      U().el('div', { class: 'field' }, U().el('label', { text: '结束' }), enI),
+      U().el('div', { style: dimStyle, text: live ? '正在计时：结束时间由计时器收口，先只调整开始。' : '保存后这一段时长与总用时自动重算。' }),
+      err);
+
+    function submit(close) {
+      const sm = parseHM(stI.value);
+      if (sm == null) { err.textContent = '开始时间请填 HH:MM'; return; }
+      const em = live ? null : parseHM(enI.value);
+      if (!live && em == null) { err.textContent = '结束时间请填 HH:MM'; return; }
+      const start = tsOnDay(g.start, sm);
+      let end = (em == null) ? null : tsOnDay(g.start, em);
+      if (end != null && end <= start) end += 86400000;      // 跨午夜：结束算第二天（与 segSec 的绝对时间口径一致）
+      const now = Date.now();
+      if (start > now) { err.textContent = '开始时间不能晚于现在'; return; }
+      if (end != null && end > now) { err.textContent = '结束时间不能晚于现在'; return; }
+      if (Math.round(((end == null ? now : end) - start) / 1000) > SEG_MAX_SEC) { err.textContent = '单段计时不能超过 8 小时'; return; }
+      close();
+      onSave(start, end);
+    }
+
+    U().modal({
+      title: '修改计时',
+      body,
+      actions: [
+        { label: '取消', onClick: (c) => c() },
+        { label: '保存', primary: true, onClick: (c) => submit(c) },
+      ],
+    });
+    setTimeout(() => { try { stI.focus(); } catch (_) {} }, 80);
   }
 
   // —— 编辑器（含自定义属性动态字段）——
@@ -2089,7 +2264,7 @@ App.records = (function () {
       });
       // 空文档：给一个能点的占位（点它就开始写第一段）
       if (!mdText.trim()) {
-        const ph = U().el('div', { class: 'ed-md-empty', text: '写点什么…支持 Markdown（# 标题、- 列表、**加粗**、``` 代码）' });
+        const ph = U().el('div', { class: 'ed-md-empty', text: '写点什么…' });
         ph.addEventListener('click', () => openBlock(0));
         docEl.appendChild(ph);
       }
@@ -3209,7 +3384,7 @@ App.records = (function () {
     function bindNum(el, fn) { numBinders.push({ el: el, fn: fn }); return el; }
     function paintNums() {
       for (let i = 0; i < numBinders.length; i++) {
-        try { numBinders[i].el.textContent = U().fmtClock(numBinders[i].fn()); } catch (_) {}
+        try { numBinders[i].el.textContent = U().fmtHMS(numBinders[i].fn()); } catch (_) {}
       }
     }
 
@@ -3273,14 +3448,26 @@ App.records = (function () {
     function buildSegRow(g) {
       const live = g.end == null;
       const row = U().el('div', { class: 'seg-row' + (live ? ' is-live' : '') });
-      const time = U().el('span', { class: 'seg-time' });
+      // 时刻是按钮：点一下就能改这一段的开始 / 结束（原来是只读文本）。
+      // 正在走的那一段显示的是「已用时长」（bindNum 每秒刷），点它同样能改开始时间。
+      const time = U().el('button', { class: 'seg-time', type: 'button', title: '修改起止时间' });
       if (live) { bindNum(time, () => segSec(g)); time.classList.add('is-clock'); }
       else time.textContent = hhmm(g.start) + '–' + hhmm(g.end);
+      time.addEventListener('click', () => {
+        openSegTime(g, (st, en) => {
+          g.start = st;
+          if (en != null) g.end = en;
+          renderSteps(); syncTabs(); commitSteps();
+        });
+      });
       const noteBtn = U().el('button', { class: 'seg-note', type: 'button', text: g.note || '加备注' });
       noteBtn.addEventListener('click', () => editSegNote(g));
       const del = U().el('button', { class: 'icon-btn seg-del', type: 'button', html: U().icon('x', 13), title: '删除这一段' });
       del.addEventListener('click', () => delSeg(g));
-      row.appendChild(time); row.appendChild(noteBtn); row.appendChild(del);
+      row.appendChild(time); row.appendChild(noteBtn);
+      // 已结束的段在备注后面补一个耗时（时:分:秒）；正在走的那段左边就是耗时，不重复
+      if (!live) row.appendChild(U().el('span', { class: 'seg-dur', text: U().fmtHMS(segSec(g)) }));
+      row.appendChild(del);
       return row;
     }
 
@@ -3392,7 +3579,7 @@ App.records = (function () {
       });
     }
     function delSeg(g) {
-      U().confirmDialog('删除这一段计时（' + U().fmtClock(segSec(g)) + '）？', { okLabel: '删除', danger: true }).then(async (ok) => {
+      U().confirmDialog('删除这一段计时（' + U().fmtHMS(segSec(g)) + '）？', { okLabel: '删除', danger: true }).then(async (ok) => {
         if (!ok) return;
         const st = App.timer ? App.timer.state() : { running: false };
         if (st.running && st.segId === g.id) await App.timer.stop();
@@ -3517,7 +3704,13 @@ App.records = (function () {
       right: [metaBtn, saveBtnEl],   // 右上角：笔记信息（⋯）+ 保存对勾
       // 返回键分级：非正文视图时先回正文，正文视图才交给默认的「关页面」。
       // 抽屉 / 灯箱是后 push 的浮层，closeTopLayer 会先把它们关掉，再来问这里。
-      onBack: () => { if (curView !== 1) { goView(1); return true; } return false; },
+      // 专注页（focus，z-index 53）盖在编辑页之上，且它不是路由页 —— 返回应该先退它，
+      // 否则从编辑页点「放大」进来后按返回，会直接把脚下的编辑页关掉、专注页留在屏幕上。
+      onBack: () => {
+        if (App.focus && App.focus.isOpen && App.focus.isOpen()) { App.focus.close(); return true; }
+        if (curView !== 1) { goView(1); return true; }
+        return false;
+      },
       onClose: () => {
         // 取消 / 关闭 / 返回键：本次新写进相册、但还没绑定到记录上的图全部删掉，不留垃圾文件。
         // 判据用「数组非空」而不是「没保存过」——点计时会静默暂存一次（那时数组已被清空），
@@ -3738,6 +3931,7 @@ App.records = (function () {
   return {
     renderList, renderDetail, openEditor, mdHtml, segSec, stepSec, recSec,
     syncTimeFromSteps, normalizeSteps, closeTimerWin, initTimerWin, splitDoc,
+    setFocusMode, progBadge, promptText, patchSegNote,
     get editorMode() { return editorMode; },
     set editorMode(v) { editorMode = v === 'source' ? 'source' : 'blocks'; },
   };

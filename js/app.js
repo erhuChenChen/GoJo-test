@@ -606,6 +606,11 @@ App.app = (function () {
   // 返回 true 表示这一下返回已经被消费掉，不要再退页面
   function consumeBack() {
     if (U() && U().closeTopLayer && U().closeTopLayer()) return true;         // 浮层优先
+    // 专注计时页是「临时接管屏」，不是路由页，所以必须在这里显式消费：
+    // 先于 record 判断 —— 否则从详情页进专注页后按返回会直接退到列表。
+    // 仍排在 closeTopLayer 之后：专注页里弹出的备注框 / 确认框在它上面，返回要先关那些。
+    // 编辑页（page-sheet）自己压在栈里时，由它的 onBack 先退专注页（见 records.js）。
+    if (App.focus && App.focus.isOpen && App.focus.isOpen()) { App.focus.close(); return true; }
     if (App.settings && App.settings.backToParent && App.settings.backToParent()) return true; // 设置页的就地编辑
     const h = (location.hash || '').replace('#/', '');
     const base = h.split('/')[0] || 'dashboard';

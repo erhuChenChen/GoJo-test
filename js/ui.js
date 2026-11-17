@@ -33,6 +33,8 @@ App.ui = (function () {
     play: '<path d="M8 5l11 7-11 7z"/>',
     pause: '<path d="M9 5v14M15 5v14"/>',
     stop: '<rect x="7" y="7" width="10" height="10" rx="1.5"/>',
+    /* 放大/最大化：四角外扩箭头。给计时小窗的「进专注页」用 */
+    expand: '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
     x: '<path d="M18 6L6 18M6 6l12 12"/>',
     trash: '<path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V6"/><path d="M10 11v6M14 11v6"/>',
     edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>',
@@ -274,6 +276,15 @@ App.ui = (function () {
     const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
     const p = (n) => String(n).padStart(2, '0');
     return h ? (h + ':' + p(m) + ':' + p(ss)) : (p(m) + ':' + p(ss));
+  }
+  //   fmtHMS(312) → "00:05:12"；fmtHMS(3723) → "01:02:03"
+  //   「耗时」一律用它：时:分:秒 三位恒定补零，列表里上下对齐、不会一会儿两段一会儿三段。
+  //   不要拿它替换 fmtClock —— 小窗只有 132px 宽、专注页大钟按 mm:ss 排过版，
+  //   那些是「正在走的时钟」，超过一小时才补小时位才够紧凑。
+  function fmtHMS(sec) {
+    const s = Math.max(0, Math.floor(Number(sec) || 0));
+    const p = (n) => String(n).padStart(2, '0');
+    return p(Math.floor(s / 3600)) + ':' + p(Math.floor((s % 3600) / 60)) + ':' + p(s % 60);
   }
 
   // —— 快捷新建分类 / 标签（供列表与编辑器复用）——
@@ -880,6 +891,6 @@ App.ui = (function () {
     showBusy, hideBusy, isBusy, setBusyText,
     makeSelect, closeSelMenu, openCalendar, openColorPicker, closeColorPicker, openImageViewer,
     closeImageViewer, isImageViewerOpen, closeTopLayer,
-    fmtMoney, fmtDate, fmtDateTime, monthKey, fmtDuration, fmtClock, quickAddCategory, quickAddTag,
+    fmtMoney, fmtDate, fmtDateTime, monthKey, fmtDuration, fmtClock, fmtHMS, quickAddCategory, quickAddTag,
   };
 })();

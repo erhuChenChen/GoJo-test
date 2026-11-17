@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
   <meta name="theme-color" content="#15171c" />
   <title>GoJo</title>
-  <link rel="stylesheet" href="css/base.css?v=20261117b" />
-  <link rel="stylesheet" href="css/themes.css?v=20261117b" />
-  <link rel="stylesheet" href="css/components.css?v=20261117b" />
+  <link rel="stylesheet" href="css/base.css?v=20261117e" />
+  <link rel="stylesheet" href="css/themes.css?v=20261117e" />
+  <link rel="stylesheet" href="css/components.css?v=20261117e" />
 </head>
 <body>
   <div id="app">
@@ -23,24 +23,26 @@
   <div id="toast-root"></div>
 
   <!-- 本地内置 JSZip（离线可用，不依赖 CDN） -->
-  <script src="js/vendor/jszip.min.js?v=20261117b"></script>
+  <script src="js/vendor/jszip.min.js?v=20261117e"></script>
   <!-- 业务脚本：经典 script 顺序加载，挂在 window.App 命名空间 -->
-  <script src="js/storage.js?v=20261117b"></script>
-  <script src="js/db.js?v=20261117b"></script>
-  <script src="js/state.js?v=20261117b"></script>
-  <script src="js/domains.js?v=20261117b"></script>
-  <script src="js/themes.js?v=20261117b"></script>
-  <script src="js/ui.js?v=20261117b"></script>
-  <script src="js/md.js?v=20261117b"></script>
+  <script src="js/storage.js?v=20261117e"></script>
+  <script src="js/db.js?v=20261117e"></script>
+  <script src="js/state.js?v=20261117e"></script>
+  <script src="js/domains.js?v=20261117e"></script>
+  <script src="js/themes.js?v=20261117e"></script>
+  <script src="js/ui.js?v=20261117e"></script>
+  <script src="js/md.js?v=20261117e"></script>
   <!-- Markdown 排版栏的「算文本 + 算选区」纯函数层（markdown-toolbar-element 2.2.3 移植，MIT） -->
-  <script src="js/vendor/md-toolbar.js?v=20261117b"></script>
-  <script src="js/setup.js?v=20261117b"></script>
-  <script src="js/dashboard.js?v=20261117b"></script>
-  <script src="js/records.js?v=20261117b"></script>
+  <script src="js/vendor/md-toolbar.js?v=20261117e"></script>
+  <script src="js/setup.js?v=20261117e"></script>
+  <script src="js/dashboard.js?v=20261117e"></script>
+  <script src="js/records.js?v=20261117e"></script>
   <!-- 计时内核：只存绝对时间戳、运行期间不写库（见文件头注释） -->
-  <script src="js/timer.js?v=20261117b"></script>
-  <script src="js/settings.js?v=20261117b"></script>
-  <script src="js/exim.js?v=20261117b"></script>
-  <script src="js/app.js?v=20261117b"></script>
+  <script src="js/timer.js?v=20261117e"></script>
+  <script src="js/settings.js?v=20261117e"></script>
+  <script src="js/exim.js?v=20261117e"></script>
+  <!-- 专注计时页：依赖 timer + records.setFocusMode，必须在 app.js 之前 -->
+  <script src="js/focus.js?v=20261117e"></script>
+  <script src="js/app.js?v=20261117e"></script>
 </body>
 </html>
