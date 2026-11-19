@@ -33,6 +33,12 @@ App.state = (function () {
     // 列表卡片：记录名称 / 日期固定显示，不再属于可勾选字段（幂等清理旧值）
     if (!d.cardFields) d.cardFields = [];
     d.cardFields = d.cardFields.filter((k) => k !== 'title' && k !== 'date');
+    // 一次性把「标签 / 待办」补成默认展示。
+    // 必须写版本号：不然用户在设置里把它们关掉，下次启动又会被补回来，怎么关都关不掉。
+    if (d.cardFieldsVer !== 2) {
+      ['tags', 'steps'].forEach((k) => { if (d.cardFields.indexOf(k) === -1) d.cardFields.push(k); });
+      d.cardFieldsVer = 2;
+    }
     return d;
   }
 

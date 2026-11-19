@@ -14,6 +14,19 @@
   /* 强调色作底时，叠在上面的文字/图标颜色（深底白字、浅底黑字，由 JS 按亮度算） */
   --on-accent: #ffffff;
   --accent-soft: rgba(139,156,255,0.16);
+  /* 引用块底色：强调色的 10%（比 --accent-soft 再淡一档）。
+     引用是「正文的一部分」，不是操作反馈，底色只需要托住它、不需要抢眼。 */
+  --quote-bg: rgba(139,156,255,0.10);
+  /* 五色高亮（正文 mark）：透明度统一 40%，字色一律取 --text。
+     不再跟 --accent-soft 挂钩 —— 强调色变了高亮跟着变，用户记不住「我标的是哪一色」。
+     40% 是深浅两套底都还能读的上限：再高，深色主题的白字会陷进底色里发灰。 */
+  --mark-yellow: rgba(255,210,63,0.40);
+  --mark-red: rgba(255,107,107,0.40);
+  --mark-orange: rgba(255,159,69,0.40);
+  --mark-green: rgba(74,222,128,0.40);
+  --mark-blue: rgba(79,140,255,0.40);
+  --mark-purple: rgba(177,140,255,0.40);
+  --mark-current: #ffd23f; /* 工具条高亮按钮下沿那条色条：用实色，40% 在工具条上几乎看不见 */
   --border: rgba(255,255,255,0.10);
   --glass: rgba(255,255,255,0.06);
   /* 页面背景的半透明版本：顶栏/底栏用它做底色，
@@ -32,8 +45,11 @@
   --page-pad: 16px; /* 全局页面左右统一内边距（保证左右对称） */
   --sc-thumb: rgba(140,152,172,0.5); /* 横向滚动条滑块：中性灰，深浅主题下都清晰可见 */
   --font-scale: 1; /* 全局字号缩放因子，由 JS 按档位设置（小0.875/标准1/大1.15/超大1.3） */
+  /* 末尾必须带彩色 emoji 字体：安卓 WebView 的中文字体普遍没有 emoji 字形，
+     缺了这一串就会回落到「系统符号字体」，😀 变成黑白方块或直接豆腐块。 */
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-          "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+          "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif,
+          "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Noto Sans Symbols 2";
 }
 
 html, body { height: 100%; }
@@ -46,7 +62,9 @@ body {
   line-height: 1.55;
   font-size: 1rem;
   -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
+  /* 不用 optimizeLegibility：部分内核会为连字/字距重排字形，
+     和 emoji 的彩色字形打架，标题里的 😀 就会显示成方块或问号。 */
+  text-rendering: auto;
   /* 重要：body 绝不加 overflow:hidden / overflow-x:clip 这类会裁剪或抑制
      后代滚动容器的属性，否则设置页导航 / 记录页分类栏等横向滑动会被压死。
      滚动条统一用下方 scrollbar-width:none + ::-webkit-scrollbar{display:none}

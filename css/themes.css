@@ -13,6 +13,7 @@
   --accent: #8b9cff;
   --on-accent: #ffffff;
   --accent-soft: rgba(139,156,255,0.16);
+  --quote-bg: rgba(139,156,255,0.10);
   --border: rgba(255,255,255,0.10);
   --glass: rgba(255,255,255,0.06);
   /* 阴影取强调色 #8b9cff 加深，柔和轻盈，不再是死黑 */
@@ -35,6 +36,8 @@
   --accent: #4f8cff;
   --on-accent: #ffffff;
   --accent-soft: rgba(79,140,255,0.14);
+  /* 浅色主题底色本来就亮，引用的淡底给 8% 就够看出边界 */
+  --quote-bg: rgba(79,140,255,0.08);
   --border: rgba(25,40,80,0.09);
   --glass: rgba(255,255,255,0.62);
   --shadow: 0 1px 3px rgba(46,81,148,0.10), 0 12px 28px rgba(46,81,148,0.18);
@@ -55,6 +58,7 @@
   --accent: #e0915a;
   --on-accent: #ffffff;
   --accent-soft: rgba(224,145,90,0.18);
+  --quote-bg: rgba(224,145,90,0.10);
   --border: rgba(255,230,200,0.12);
   --glass: rgba(255,238,220,0.07);
   --shadow: 0 1px 3px rgba(116,75,47,0.32), 0 12px 30px rgba(116,75,47,0.40);
@@ -75,6 +79,7 @@
   --accent: var(--accent-custom, #8b9cff);
   --on-accent: var(--onacc-custom, #ffffff);
   --accent-soft: var(--accentsoft-custom, rgba(139,156,255,0.16));
+  --quote-bg: var(--quotebg-custom, rgba(139,156,255,0.10));
   --border: var(--border-custom, rgba(255,255,255,0.09));
   --glass: var(--glass-custom, rgba(255,255,255,0.06));
   --shadow: 0 1px 3px rgba(72,81,132,0.30), 0 12px 30px rgba(72,81,132,0.38);

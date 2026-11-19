@@ -242,6 +242,21 @@
    但用户要的只有「对勾符号的背景色」变强调色。 */
 .prog.is-all .prog-box { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 
+/* 列表卡片里的待办区：只放「勾选框 + 一行文字」，最多两条（未完成优先）。
+   刻意不显示任何计时/耗时 —— 那种数字只该在详情页看，放列表里会把卡片撑乱。
+   每行定高 + 文字单行省略，两张卡片的待办区高度就完全一致，瀑布流不会参差。 */
+.rc-steps { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; min-width: 0; }
+.rc-step { display: flex; align-items: center; gap: 6px; min-width: 0; height: 16px; color: var(--text); }
+.rc-step .prog-box { width: 11px; height: 11px; border-radius: 3px; opacity: .75; }
+.rc-step-t {
+  flex: 1 1 auto; min-width: 0;
+  font-size: calc(var(--font-scale, 1) * 12.5px); line-height: 16px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rc-step.is-done { color: var(--text-dim); }
+.rc-step.is-done .rc-step-t { text-decoration: line-through; opacity: .8; }
+.rc-step.is-done .prog-box { background: var(--accent); border-color: var(--accent); color: var(--on-accent); opacity: 1; }
+
 /* 列表顶部工具条：左侧[添加/选择] 右侧[排序/筛选] 两端对齐，中间留白
    （display / 折行 / 横向滑动 / 锁宽 / 隐藏滚动条 已由顶部公共基类提供） */
 .list-tools { align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 14px; }
@@ -1185,20 +1200,24 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 .step-dur { flex: 0 0 auto; font-size: calc(var(--font-scale, 1) * 12px); font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-dim); }
 .step-more { flex: 0 0 auto; width: 28px; height: 28px; color: var(--text-dim); }
 .step-segs { margin: 8px 0 0 30px; display: flex; flex-direction: column; gap: 4px; }
-/* 计时段一行：时刻（可点改起止）+ 备注（可点改，可换行）+ 耗时 + 删除。
+/* 计时段一行：时刻（09:12–09:30，可点改起止）+ 备注（可换行）+ 耗时。
    字号必须带 --font-scale：备注是正文性文字，用户调全局字号时必须跟着变；
-   同一行的时刻 / 耗时一起走，否则 1.3 档下会出现「备注 15.6px、时刻 12px」的错位。 */
+   同一行的时刻 / 耗时一起走，否则 1.3 档下会出现「备注 15.6px、时刻 12px」的错位。
+
+   20261117f 中途试过「起止拆成上下两行」+ min-height 对齐 —— 实际排出来一行里三样东西
+   高低不齐、比原来更丑，已退回横向一行。只保留「去掉虚线下划线」这一条。 */
 .seg-row { display: flex; align-items: flex-start; gap: 8px; font-size: calc(var(--font-scale, 1) * 12px); color: var(--text-dim); }
-/* 时刻是按钮（点它改起止）：复位 button 默认外观，只留一条虚线暗示「可以点」。
+/* 时刻是按钮（点它改起止）：复位 button 默认外观。
+   20261117f 起不再画虚线下划线（用户要求去掉），可点性靠 :active 变色。
    注意 font:inherit 会重置 font-variant，所以 tabular-nums 必须写在它后面。 */
 .seg-time {
-  flex: 0 0 auto; padding: 0; border: 0; border-bottom: 1px dashed var(--border);
-  background: transparent; color: inherit; font: inherit;
+  flex: 0 0 auto; padding: 0; border: 0; background: transparent; color: inherit; font: inherit;
   font-variant-numeric: tabular-nums; white-space: nowrap; text-align: left;
   -webkit-tap-highlight-color: transparent;
 }
-.seg-time:active { color: var(--accent); border-bottom-color: var(--accent); }
-.seg-row.is-live .seg-time { color: var(--accent); font-weight: 800; border-bottom-color: var(--accent-soft); }
+.seg-time:active { color: var(--accent); }
+/* 正在计时的那一段：时刻那一格显示的是实时读数，用强调色压一下 */
+.seg-row.is-live .seg-time { color: var(--accent); font-weight: 800; }
 .seg-note {
   flex: 1 1 auto; min-width: 0; padding: 0; border: 0; background: transparent;
   font-family: inherit; font-size: calc(var(--font-scale, 1) * 12px); color: var(--text-dim); text-align: left;
@@ -1208,9 +1227,21 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
   -webkit-tap-highlight-color: transparent;
 }
 .seg-note:active { color: var(--accent); }
-/* 每段耗时（时:分:秒）：比时刻小半号，不跟左边的时间抢注意力 */
-.seg-dur { flex: 0 0 auto; font-size: calc(var(--font-scale, 1) * 11.5px); font-variant-numeric: tabular-nums; color: var(--text-dim); opacity: .9; white-space: nowrap; }
-.seg-del { flex: 0 0 auto; width: 22px; height: 22px; color: var(--text-dim); opacity: .65; }
+/* 每段耗时（分:秒，超 1 小时自动带小时）：比时刻小半号，不跟左边抢注意力 */
+.seg-dur {
+  flex: 0 0 auto; font-size: calc(var(--font-scale, 1) * 11.5px); font-variant-numeric: tabular-nums;
+  color: var(--text-dim); opacity: .9; white-space: nowrap;
+}
+/* × 是控件不是正文：跟行中线。平时不渲染，进「删除计时」模式才建节点 */
+.seg-del { flex: 0 0 auto; align-self: center; width: 22px; height: 22px; color: var(--text-dim); opacity: .65; }
+/* 删除模式的「完成」胶囊：与 .step-timer 同族，窄一号 */
+.seg-done {
+  flex: 0 0 auto; height: 22px; padding: 0 9px; border-radius: var(--radius-pill);
+  border: 1px solid var(--accent); background: transparent; color: var(--accent);
+  font-family: inherit; font-size: calc(var(--font-scale, 1) * 11.5px); font-weight: 700;
+  -webkit-tap-highlight-color: transparent;
+}
+.step-more.is-del { color: var(--accent); }
 .step-actions { display: flex; gap: 8px; margin: 8px 0 0 30px; }
 .step-timer {
   display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 12px;
@@ -1461,7 +1492,10 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
   overflow-x: auto; overflow-y: hidden;
   -webkit-overflow-scrolling: touch; scrollbar-width: none;
   overscroll-behavior-x: contain;
-  margin: 0; padding: 0 max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right));
+  /* 左侧不留白：图标按钮从最左边开始排（此前是 max(--page-pad)，左端凭空空出 16px，
+     看起来像工具条前面掉了两个按钮）。右侧仍留 page-pad，滚到末尾时最后一个按钮不贴边；
+     刘海屏横屏只让出 safe-area，不让 page-pad。 */
+  margin: 0; padding: 0 max(var(--page-pad), env(safe-area-inset-right)) 0 env(safe-area-inset-left, 0px);
   visibility: hidden; opacity: 0; pointer-events: none;
   transition: opacity .16s ease;      /* 同上：只过渡 opacity */
 }
@@ -1519,13 +1553,66 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 .ed-hmenu-lv5 .ed-hmenu-t { font-size: 13px; font-weight: 700; }
 @keyframes edHMenuIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
+/* ===== 高亮：按钮下沿色条 + 五色面板 =====
+   为什么按钮要一条色条：五色之后「点下去会用哪个颜色」不再是固定的，
+   不标出来用户每次都得点开看一眼。色条只占按钮底部 2px，不挡图标。 */
+.ed-tool.mark-btn { position: relative; }
+.ed-tool.mark-btn::after {
+  content: ''; position: absolute; left: 7px; right: 7px; bottom: 3px; height: 2px;
+  border-radius: 1px; background: var(--mark-current);
+}
+
+/* 面板同样必须挂在 .ed-dock 上（.ed-dock-tools 的 overflow-x:auto 会把它裁掉）。
+   left 由 JS 按按钮位置算并做边界收拢，这里只管纵向与外观。 */
+.mark-panel {
+  position: absolute; z-index: 61;
+  bottom: calc(100% + 6px);
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 9px;
+  background: var(--bg-2);
+  border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .32), 0 2px 6px rgba(0, 0, 0, .18);
+  animation: edHMenuIn .12s ease-out;
+}
+.mark-panel.hidden { display: none; }
+.mark-dot {
+  flex: 0 0 auto; box-sizing: border-box;
+  width: 22px; height: 22px; padding: 0;
+  border: 0; border-radius: 50%;
+  background: var(--mark-yellow);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .16);
+  -webkit-tap-highlight-color: transparent;
+  transition: transform .1s ease;
+}
+.mark-dot:active { transform: scale(.88); }
+/* 当前色：内圈用底面色垫开，外圈用正文色 —— 深浅主题都看得见，不用打勾也不会认错 */
+.mark-dot.is-cur { box-shadow: 0 0 0 2px var(--bg-2), 0 0 0 3.5px var(--text); }
+.mark-sep { flex: 0 0 auto; width: 1px; height: 16px; margin: 0 1px; background: var(--border); }
+.mark-clear {
+  flex: 0 0 auto; position: relative; box-sizing: border-box;
+  width: 22px; height: 22px; padding: 0;
+  border: 1px solid var(--border); border-radius: 50%;
+  background: transparent;
+  -webkit-tap-highlight-color: transparent;
+}
+.mark-clear::after {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  width: 11px; height: 1.5px; border-radius: 1px;
+  background: var(--text-dim);
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
 /* 全屏编辑表单：无边框输入，像原生发布页 */
 /* 编辑表单：底部留 8px —— 字数胶囊浮在排版栏上沿之外，表单末端不需要给它让位 */
 .ed-form { display: flex; flex-direction: column; padding-bottom: 8px; }
 .ed-media { margin: 2px 0 12px; }
 .ed-title {
   width: 100%; border: none; border-radius: 0;
-  background: transparent; color: var(--text); font-family: inherit;
+  background: transparent; color: var(--text);
+  /* 显式写 var(--font)（而不是 inherit）+ text-rendering:auto：
+     标题是 emoji 最容易出问题的地方（字号大、字重 700），
+     继承链路里任何一处改回 optimizeLegibility 都会让 😀 变方块。 */
+  font-family: var(--font); text-rendering: auto;
   font-size: calc(var(--font-scale, 1) * 20px); font-weight: 700;
   padding: 10px 2px 8px; outline: none;
 }
@@ -1580,6 +1667,11 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 }
 /* 空行块：只负责撑出那段空白（高度由行内 style 按行数算） */
 .ed-doc .ed-gap { width: 100%; }
+/* 跨块选区的高亮覆盖层：正文正在编辑的那一块用 textarea 自带选区，
+   其它块是渲染好的 DOM，没法用原生选区一起高亮，就用一层绝对定位的方块标出来。
+   pointer-events:none —— 它只是视觉，绝不能挡住手指落点（否则越拖越选不动）。 */
+.ed-cross-layer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; z-index: 1; pointer-events: none; }
+.ed-cross-rect { position: absolute; border-radius: 2px; background: var(--accent-soft, rgba(120, 160, 255, .26)); }
 /* 渲染块自己不带上下外边距 —— 段间距一律由空行块承担，否则「一个空行」会被算成两倍 */
 .ed-doc .ed-block > :first-child { margin-top: 0; }
 .ed-doc .ed-block > :last-child { margin-bottom: 0; }
@@ -1588,9 +1680,14 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 .ed-doc .md-body h1, .ed-doc .md-body h2, .ed-doc .md-body h3,
 .ed-doc .md-body h4, .ed-doc .md-body h5, .ed-doc .md-body h6 { margin: 0; }
 .ed-doc .md-body ul, .ed-doc .md-body ol { padding-left: 1.4em; }
-.ed-doc .md-body blockquote { padding-left: 10px; border-left: 3px solid var(--border); color: var(--text-dim); }
+/* 编辑态只收紧内边距，不再改颜色 ——
+   以前这条把竖线换成 --border（9% 灰）、字色换成 --text-dim，
+   于是编辑页的引用「三个元素同时退到背景里」，和详情页也不是一个样子。
+   引文是要读的内容，不是次要信息，字色必须和正文同色。 */
+.ed-doc .md-body blockquote { padding-left: 10px; }
 .ed-doc .md-body hr { margin: 0; }
-.ed-md-empty { color: var(--text-dim); padding: 2px 0; }
+/* 空文档时那块可点的空白：只负责「有个地方能点进来写第一段」，不显示任何提示文字 */
+.ed-md-empty { min-height: 1.78em; cursor: text; }
 /* 正在编辑的那一块：把渲染内容藏掉、只留源码输入框（不是叠在上面） */
 .ed-block.is-editing > *:not(.blk-src) { display: none; }
 /* 块内的源码输入框：不吃 .ed-desc 那套「撑满 / 120px 下限 / 底部让位」 */
@@ -1649,6 +1746,15 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 .ed-inline { display: flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; }
 .ed-inline .input { flex: 1 1 auto; min-width: 0; width: auto; }
 .ed-inline .muted { font-size: calc(var(--font-scale, 1) * 12.5px); white-space: nowrap; }
+
+/* 「修改计时」弹窗里的「日期 + 时间」并排：
+   日期宽一点（2026-11-18 要放得下），时间窄一点；两个都允许收缩，窄屏不会顶出弹窗。
+   注意别复用 .ed-inline —— 那个 flex:1 1 0 是给「横向一行里的列」准备的，
+   放进 .field（纵向 flex）会把整行高度压成 0。 */
+.seg-row { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; }
+.seg-row .input { min-width: 0; width: auto; }
+.seg-row .input[type="date"] { flex: 1.35 1 0; }
+.seg-row .input[type="time"] { flex: 1 1 0; }
 
 /* 图片区：大尺寸网格（手机上两列，每格约半屏宽，预览更大更清楚）
    —— 已回退此前那套「横向大图滑动」的复杂排版，恢复为最初的网格结构。 */
@@ -1761,7 +1867,7 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 .md-body ul { list-style: disc outside; }
 .md-body ol { list-style: decimal outside; }
 .md-body li { margin: 3px 0; }
-.md-body blockquote { margin: 10px 0; padding: 6px 12px; border-left: 3px solid var(--accent); background: var(--surface-2); border-radius: 0 10px 10px 0; color: var(--text-dim); }
+.md-body blockquote { margin: 10px 0; padding: 6px 12px; border-left: 3px solid var(--accent); background: var(--quote-bg); border-radius: 0 10px 10px 0; color: var(--text); }
 .md-body blockquote p { margin: 0; }
 .md-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; padding: 1px 5px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--border); }
 .md-body pre.md-pre { margin: 10px 0; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); overflow-x: auto; line-height: 1.6; }
@@ -1769,9 +1875,16 @@ button.icon-btn[style*="danger"]:hover { color: var(--danger) !important; }
 .md-body a { color: var(--accent); text-decoration: underline; }
 .md-body hr { margin: 16px 0; border: none; border-top: 1px solid var(--border); }
 .md-body del { opacity: .72; }
-/* 高亮 ==文字==：走强调色 token，不写死 yellow —— mark 的 UA 默认黄底在深色主题下刺眼，
-   而且和用户自定义的主题强调色完全脱节。 */
-.md-body mark { background: var(--accent-soft); color: var(--text); border-radius: 3px; padding: 0 2px; }
+/* 高亮 mark：六色 + 透明度统一 40%，字色一律 --text（与正文完全同色）。
+   为什么不跟主题强调色走：强调色在高亮上的作用是「告诉你这里有东西」，
+   但用户真正想区分的是「这一句是重点 / 是错 / 是待办」，一个颜色表达不了这么多层意思。
+   也不写死 yellow —— mark 的 UA 默认黄底在深色主题下刺眼，且不可调。 */
+.md-body mark { background: var(--mark-yellow); color: var(--text); border-radius: 3px; padding: 0 2px; }
+.md-body mark.hl-red { background: var(--mark-red); }
+.md-body mark.hl-orange { background: var(--mark-orange); }
+.md-body mark.hl-green { background: var(--mark-green); }
+.md-body mark.hl-blue { background: var(--mark-blue); }
+.md-body mark.hl-purple { background: var(--mark-purple); }
 /* 任务列表 - [ ] / - [x]：方形勾选框用伪元素画，未完成是空心、已完成是实心强调色 + 删除线 */
 .md-body li.md-task-item { list-style: none; position: relative; padding-left: 20px; }
 .md-body li.md-task-item::before {

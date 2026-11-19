@@ -277,15 +277,9 @@ App.ui = (function () {
     const p = (n) => String(n).padStart(2, '0');
     return h ? (h + ':' + p(m) + ':' + p(ss)) : (p(m) + ':' + p(ss));
   }
-  //   fmtHMS(312) → "00:05:12"；fmtHMS(3723) → "01:02:03"
-  //   「耗时」一律用它：时:分:秒 三位恒定补零，列表里上下对齐、不会一会儿两段一会儿三段。
-  //   不要拿它替换 fmtClock —— 小窗只有 132px 宽、专注页大钟按 mm:ss 排过版，
-  //   那些是「正在走的时钟」，超过一小时才补小时位才够紧凑。
-  function fmtHMS(sec) {
-    const s = Math.max(0, Math.floor(Number(sec) || 0));
-    const p = (n) => String(n).padStart(2, '0');
-    return p(Math.floor(s / 3600)) + ':' + p(Math.floor((s % 3600) / 60)) + ':' + p(s % 60);
-  }
+  // 「耗时」也用这一个：不足 1 小时是 05:12，超过才出现小时位 1:02:03。
+  // 20261117e 曾经为「列对齐」加过恒补零的 fmtHMS，20261117f 按用户要求退回这里 ——
+  // 段行只有一行宽，多出来的那个 0 和冒号就是挤掉备注的原因。
 
   // —— 快捷新建分类 / 标签（供列表与编辑器复用）——
   function quickAddCategory(domain, onAdded) {
@@ -891,6 +885,6 @@ App.ui = (function () {
     showBusy, hideBusy, isBusy, setBusyText,
     makeSelect, closeSelMenu, openCalendar, openColorPicker, closeColorPicker, openImageViewer,
     closeImageViewer, isImageViewerOpen, closeTopLayer,
-    fmtMoney, fmtDate, fmtDateTime, monthKey, fmtDuration, fmtClock, fmtHMS, quickAddCategory, quickAddTag,
+    fmtMoney, fmtDate, fmtDateTime, monthKey, fmtDuration, fmtClock, quickAddCategory, quickAddTag,
   };
 })();

@@ -7,8 +7,9 @@
  * 把「选区怎么扩、记号怎么加、再点一次怎么脱」全部算准的纯函数，去掉自定义元素外壳。
  * 函数体逐字保留（isMultipleLines → compute 共 17 个），只做下面 4 处改造。
  *
- * 【改造 1】新增 placeholder：空选区且光标处没有词可扩时，插入「**粗体**」这类占位并选中占位文字。
- *            原库只插一对空记号、光标夹在中间，中文用户看不出发生了什么。
+ * 【改造 1】取消占位词：原库「空选区且没词可扩」会插「**粗体**」并选中它。
+ *            中文正文里那是凭空多出来的两个字（光标停在行尾时必然触发），已整段删除。
+ *            空选区由 records.js 的 runMd 先扩到整行，动作一律作用于「光标所在那一行」。
  * 【改造 2】link 的 replaceNext 由 'url' 改成 'https://'：md.js 的 inline() 只放行
  *            http(s)/mailto/#，「[](url)」在详情页里连链接都不算，用户还得自己删掉 url。
  * 【改造 3】mark（==高亮==）是 App 扩展（md.js 已支持 ==> <mark>），走同一条 trimFirst 包裹路径。
@@ -146,15 +147,11 @@ App.mdToolbar = (function () {
       return { text: stripped, selectionStart: selectionStart, selectionEnd: selectionEnd };
     }
 
-    // 【改造 1】空选区 + 没词可扩 → 插入占位并选中它，用户直接打字就是替换
-    var ph = arg.placeholder;
-    if (ph && !selectedText.length) {
-      return {
-        text: prefixToUse + ph + suffixToUse,
-        selectionStart: originalSelectionStart + prefixToUse.length,
-        selectionEnd: originalSelectionStart + prefixToUse.length + ph.length
-      };
-    }
+    // 【改造 1（已取消）】原库在「空选区且没词可扩」时会插入「**粗体**」这类占位词并选中它。
+    // 中文正文里那就是凭空多出来的两个字，而且光标停在行尾（右侧没字可扩）时必然触发。
+    // 现在空选区一律由调用方先扩到整行（records.js 的 runMd），整行也空就走下面的普通包裹，
+    // 得到一对空记号、光标夹在中间 —— 不再出现任何占位词。
+    // （arg.placeholder 字段仍保留在 DEFAULTS 里兼容旧调用，但没有任何 STYLES 再提供它。）
 
     // ② 普通包裹（trimFirst：首尾空白留在记号外面，只包住文字本体）
     if (!hasReplaceNext) {
@@ -319,14 +316,15 @@ App.mdToolbar = (function () {
   // —————————————————————— 样式表 + 分发 ——————————————————————
   // 行内：prefix/suffix 对称包裹；trimFirst 保住首尾空白
   // 块级：multiline 逐行加前缀；surroundWithNewlines 前后补空行
+  // 【注意】这里不要写 placeholder —— 空选区由调用方扩到整行，占位词会直接落进正文
   var STYLES = {
-    bold: { prefix: '**', suffix: '**', trimFirst: true, placeholder: '粗体' },
-    italic: { prefix: '_', suffix: '_', trimFirst: true, placeholder: '斜体' },
-    strike: { prefix: '~~', suffix: '~~', trimFirst: true, placeholder: '删除线' },
-    mark: { prefix: '==', suffix: '==', trimFirst: true, placeholder: '高亮' },
-    code: { prefix: '`', suffix: '`', blockPrefix: '```', blockSuffix: '```', placeholder: '代码' },
+    bold: { prefix: '**', suffix: '**', trimFirst: true },
+    italic: { prefix: '_', suffix: '_', trimFirst: true },
+    strike: { prefix: '~~', suffix: '~~', trimFirst: true },
+    mark: { prefix: '==', suffix: '==', trimFirst: true },
+    code: { prefix: '`', suffix: '`', blockPrefix: '```', blockSuffix: '```' },
     // 【改造 2】replaceNext 用 'https://' 而不是原库的 'url'
-    link: { prefix: '[', suffix: '](https://)', replaceNext: 'https://', scanFor: 'https?://', placeholder: '' },
+    link: { prefix: '[', suffix: '](https://)', replaceNext: 'https://', scanFor: 'https?://' },
     unordered: { prefix: '- ', multiline: true, unorderedList: true },
     ordered: { prefix: '1. ', multiline: true, orderedList: true },
     task: { prefix: '- [ ] ', multiline: true, surroundWithNewlines: true },

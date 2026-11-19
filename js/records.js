@@ -108,7 +108,14 @@ App.records = (function () {
   }
   function sortCmp(a, b) {
     const av = sortValue(a, sortField), bv = sortValue(b, sortField);
-    return sortDir === 'asc' ? av - bv : bv - av;
+    const d = sortDir === 'asc' ? av - bv : bv - av;
+    if (d) return d;
+    // 主键相同时必须有稳定的次级键：否则同一天（甚至同一分钟）的多条记录
+    // 会随 Array.prototype.sort 的实现细节、以及列表重绘顺序来回乱窜。
+    // 先比创建时间（新的在前，和默认排序一致），再比 id，保证任意两条记录的全序是固定的。
+    const at = a.createdAt || 0, bt = b.createdAt || 0;
+    if (at !== bt) return bt - at;
+    return String(b.id) > String(a.id) ? 1 : -1;
   }
   // 关闭排序浮层（如已打开）
   function closeSortPanel() { if (sortPanelEl) { if (sortPanelEl._cleanup) sortPanelEl._cleanup(); sortPanelEl.remove(); sortPanelEl = null; } }
@@ -368,13 +375,29 @@ App.records = (function () {
     const stList = rec.steps || [];
     const stTotal = stList.length;
     const stDone = stTotal ? stList.filter((s) => s.done).length : 0;
+    // 列表里的待办区（设置里可关）：
+    //   · 最多两条，未完成的排前面（同状态保持原顺序）；
+    //   · 每行只有「勾选框 + 待办文字」，超长省略 —— 刻意不带计时 / 耗时 / 段信息，
+    //     列表是扫一眼用的，那些数字留在详情页；
+    //   · 一条待办都没有时整块不画，卡片不会多出一块空白。
+    const showSteps = has('steps');
+    const stepsEl = (showSteps && stTotal) ? (function () {
+      const box = U().el('div', { class: 'rc-steps' });
+      stList.filter((s) => !s.done).concat(stList.filter((s) => s.done)).slice(0, 2).forEach((s) => {
+        box.appendChild(U().el('div', { class: 'rc-step' + (s.done ? ' is-done' : '') },
+          U().el('span', { class: 'prog-box', html: s.done ? U().icon('check', 9) : '' }),
+          U().el('span', { class: 'rc-step-t', text: s.text || '' })));
+      });
+      return box;
+    })() : null;
     const foot = U().el('div', { class: 'rc-foot' },
       U().el('span', { class: 'rc-date', text: U().fmtDate(rec.date || rec.createdAt) }),
-      stTotal ? progBadge(stDone, stTotal, 'rc-prog') : null,
+      (showSteps && stTotal) ? progBadge(stDone, stTotal, 'rc-prog') : null,
       descCount > 0 ? U().el('span', { class: 'rc-count', text: descCount + ' 字' }) : null);
     body = U().el('div', { class: 'rc-body' },
       titleEl,
       metaRow.childNodes.length ? metaRow : null,
+      stepsEl,
       metaChips.childNodes.length ? metaChips : null,
       foot);
     if (card.classList.contains('no-cover')) putDesc();
@@ -730,6 +753,12 @@ App.records = (function () {
     let cols = [];
     let heights = [0, 0];
     let counts = [0, 0];
+    // 卡片的「记录顺序」唯一真源。
+    // 两列瀑布流的 DOM 是【列优先】的：.masonry-col[0] 里是左列全部卡片，[1] 里是右列全部卡片。
+    // 所以 grid.querySelectorAll('.record-card') 拿到的是「左1、左2、右1」，不是「1、2、3」。
+    // 任何「从 DOM 反读卡片顺序」的写法都会在切视图时把顺序洗乱（3,2,1 → 3,1,2），
+    // 一律改用这个数组。
+    let cardOrder = [];
     let gapPx = 0;
     function gapNow() {
       if (gapPx) return gapPx;
@@ -824,7 +853,8 @@ App.records = (function () {
     }
     function relayout(full) {
       if (!grid.isConnected) return;
-      const cards = Array.prototype.slice.call(grid.querySelectorAll('.record-card'));
+      // 只认 cardOrder，绝不从 DOM 反读（DOM 是列优先的，反读等于把列顺序当记录顺序）
+      const cards = cardOrder.filter((c) => c && c.isConnected);
       if (!cards.length) return;
       layoutAll(cards, full !== false);
     }
@@ -833,11 +863,14 @@ App.records = (function () {
       const list = getFilteredSorted(domain);
       if (!list.length) {
         U().clear(grid); cols = []; heights = [0, 0]; counts = [0, 0];
+        cardOrder = [];
         grid.appendChild(U().el('div', { class: 'empty-state', style: { width: '100%' } }, U().el('div', { class: 'es-icon', text: '📭' }), U().el('div', { text: App.state.data.records.length ? '没有匹配的记录' : '还没有记录，点击右下角 + 添加' })));
         return;
       }
       buildCols();
-      list.forEach((r, i) => placeCard(recordCard(r, domain), i));
+      // 先把卡片按记录顺序造好并记下来，再按这个顺序摆位 —— 之后的重排只认这一份
+      cardOrder = list.map((r) => recordCard(r, domain));
+      cardOrder.forEach((c, i) => placeCard(c, i));
     }
     drawGrid();
     // 屏幕尺寸变化（旋转/分屏）后按新宽度重新分配，避免一列很长一列很短
@@ -1396,6 +1429,9 @@ App.records = (function () {
     const stepsBox = U().el('div', { class: 'detail-steps' });
     const dNums = [];                 // [{ el, fn }] 需要每秒刷新的数字
     let dSumEl = null;                // 汇总行（总用时也要跟着跳）
+    // 「删除计时」模式：值为某条待办的 id 时，只有那一条的分段行才建 × 按钮。
+    // 平时是 null —— 叉号根本不进 DOM，行宽是字面意义地省下来了。
+    let dDelSegStepId = null;
     function bindDNum(el, fn) { if (el) dNums.push({ el: el, fn: fn }); return el; }
     function dSteps() { if (!Array.isArray(rec.steps)) rec.steps = []; return rec.steps; }
 
@@ -1458,6 +1494,12 @@ App.records = (function () {
       row('重命名', false, () => dRenameStep(s));
       row('上移一位', at <= 0, () => dMoveStep(s, -1));
       row('下移一位', at < 0 || at >= all.length - 1, () => dMoveStep(s, 1));
+      // 删除计时：平时分段行不留 ×（一行三样东西太挤），进这个模式才逐段显示
+      const delMode = dDelSegStepId === s.id;
+      row(delMode ? '完成删除' : '删除计时', !((s.segs || []).length), () => {
+        dDelSegStepId = delMode ? null : s.id;
+        paintStepsBlock();
+      });
       row('删除这条待办', false, () => dDeleteStep(s));
       const dlg = U().modal({ title: '待办操作', body: list, center: true });
     }
@@ -1489,7 +1531,7 @@ App.records = (function () {
       });
     }
     function dDeleteSeg(s, g) {
-      U().confirmDialog('删除这一段计时（' + U().fmtHMS(segSec(g)) + '）？', { okLabel: '删除', danger: true }).then(async (ok) => {
+      U().confirmDialog('删除这一段计时（' + U().fmtClock(segSec(g)) + '）？', { okLabel: '删除', danger: true }).then(async (ok) => {
         if (!ok) return;
         // 正在跑的那一段必须先把表停掉再摘：反过来会留下 end=null 的悬挂段，
         // 下次启动时 timer.init() 按 0 秒收口，这段时长就凭空消失了。
@@ -1504,6 +1546,9 @@ App.records = (function () {
             t.segs.splice(i, 1);
           });
         } catch (e) { dFail(); return; }
+        // 这段是这条待办的最后一段：× 已经无处可点，顺手退出删除模式
+        const t2 = dSteps().find((x) => x.id === s.id);
+        if (t2 && !(t2.segs || []).length && dDelSegStepId === s.id) dDelSegStepId = null;
         paintStepsBlock();
       }).catch(() => {});
     }
@@ -1544,7 +1589,15 @@ App.records = (function () {
       const dur = bindDNum(U().el('span', { class: 'step-dur' }), () => stepSec(s));
       const more = U().el('button', { class: 'icon-btn step-more', type: 'button', html: U().icon('more', 18), title: '待办操作' });
       more.addEventListener('click', () => dStepMenu(s));
-      top.appendChild(chk); top.appendChild(name); top.appendChild(dur); top.appendChild(more);
+      const delMode = dDelSegStepId === s.id;
+      if (delMode) more.classList.add('is-del');
+      top.appendChild(chk); top.appendChild(name); top.appendChild(dur);
+      if (delMode) {
+        const done = U().el('button', { class: 'seg-done', type: 'button', text: '完成' });
+        done.addEventListener('click', () => { dDelSegStepId = null; paintStepsBlock(); });
+        top.appendChild(done);
+      }
+      top.appendChild(more);
       row.appendChild(top);
 
       // 计时按钮就放在这一行下面：详情页不再需要「回编辑页滑到待办卡」才能停表
@@ -1566,22 +1619,24 @@ App.records = (function () {
         segs.forEach((g) => {
           const liveSeg = g.end == null;
           const line = U().el('div', { class: 'seg-row' + (liveSeg ? ' is-live' : '') });
-          // 与编辑页同一套：时刻可点改起止，已结束的段补「时:分:秒」耗时，行尾可删
+          // 与编辑页同一套：时刻一行显示「09:12–09:30」并可点改起止；正在走的段这一格是实时读数
           const time = U().el('button', { class: 'seg-time', type: 'button', title: '修改起止时间' });
-          if (liveSeg) {
-            bindDNum(time, () => segSec(g));
-            time.classList.add('is-clock');   // 与编辑页同义：带这个类 = 正在走的时钟
-          } else time.textContent = hmLabel(g.start) + '–' + hmLabel(g.end);
+          if (liveSeg) { bindDNum(time, () => segSec(g)); time.classList.add('is-clock'); }
+          else time.textContent = hmLabel(g.start) + '–' + hmLabel(g.end);
           time.addEventListener('click', () => dEditSegTime(s, g));
           line.appendChild(time);
           // 备注从「只读文字」改成可点即改：小窗上也能改，两边同一个入口语义
           const noteBtn = U().el('button', { class: 'seg-note-ro', type: 'button', text: g.note || '加备注' });
           noteBtn.addEventListener('click', () => dEditSegNote(s, g));
           line.appendChild(noteBtn);
-          if (!liveSeg) line.appendChild(U().el('span', { class: 'seg-dur', text: U().fmtHMS(segSec(g)) }));
-          const del = U().el('button', { class: 'icon-btn seg-del', type: 'button', html: U().icon('x', 13), title: '删除这一段' });
-          del.addEventListener('click', () => dDeleteSeg(s, g));
-          line.appendChild(del);
+          // 已结束的段在备注右侧补耗时（分:秒，超一小时自动带小时）
+          if (!liveSeg) line.appendChild(U().el('span', { class: 'seg-dur', text: U().fmtClock(segSec(g)) }));
+          // × 平时不建：只有「待办操作 → 删除计时」里才出现
+          if (delMode) {
+            const del = U().el('button', { class: 'icon-btn seg-del', type: 'button', html: U().icon('x', 13), title: '删除这一段' });
+            del.addEventListener('click', () => dDeleteSeg(s, g));
+            line.appendChild(del);
+          }
           segsEl.appendChild(line);
         });
         row.appendChild(segsEl);
@@ -1620,7 +1675,7 @@ App.records = (function () {
     }
     function paintDNums() {
       for (let i = 0; i < dNums.length; i++) {
-        try { dNums[i].el.textContent = U().fmtHMS(dNums[i].fn()); } catch (_) {}
+        try { dNums[i].el.textContent = U().fmtClock(dNums[i].fn()); } catch (_) {}
       }
       if (dSumEl) {
         const list = dSteps();
@@ -1903,7 +1958,9 @@ App.records = (function () {
   // —— 步骤 / 分段计时：时长口径的唯一实现 ——
   // 只存绝对时间戳 start / end，任何显示都现算 —— 不做「定时器累加」，
   // 所以切后台、锁屏、被系统冻结都不会让读数变慢或丢秒。
-  const SEG_MAX_SEC = 8 * 3600;   // 单段硬上限：忘了停也不会凭空多出几十小时
+  // 单段硬上限 24 小时：忘了停也不会凭空多出几十小时。
+  // 口径是「每一个计时各自」不超过 24 小时 —— 一个待办可以有很多段，合计不限。
+  const SEG_MAX_SEC = 24 * 3600;
   function segSec(s) {
     if (!s || !s.start) return 0;
     const end = (s.end == null) ? Date.now() : s.end;
@@ -1949,9 +2006,27 @@ App.records = (function () {
     const h = Number(m[1]), mi = Number(m[2]);
     return (h > 23 || mi > 59) ? null : h * 60 + mi;
   }
-  // 在 baseTs 那一天上取 hh:mm 的绝对时间戳：只换时分，日期永远跟着原记录走
-  function tsOnDay(baseTs, minutes) {
-    const d = new Date(Number(baseTs) || Date.now());
+  // —— 日期 / 时间的「人工输入」解析 ——
+  // 弹窗给的是「日期 + 时间」两组输入，但 input[type=date|time] 在个别魔改 ROM 的 WebView 里
+  // 会退化成普通文本框，用户敲进来的就是各种写法，所以后端一律自己解析、自己校验。
+  function ymdOf(ts) {
+    const d = new Date(Number(ts) || Date.now());
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  // "2026-11-18" / "2026/11/18" / "2026年11月18日" → 当天 00:00 的时间戳；不合法 → null
+  function parseYMD(v) {
+    const m = /^\s*(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?\s*$/.exec(String(v == null ? '' : v));
+    if (!m) return null;
+    const y = Number(m[1]), mo = Number(m[2]), da = Number(m[3]);
+    if (mo < 1 || mo > 12 || da < 1 || da > 31) return null;
+    const d = new Date(y, mo - 1, da, 0, 0, 0, 0);
+    // 2 月 30 日这种：Date 会自动滚到下个月，滚过就说明这一天根本不存在
+    if (d.getFullYear() !== y || d.getMonth() !== mo - 1 || d.getDate() !== da) return null;
+    return d.getTime();
+  }
+  // 在「某一天的 00:00」上加 hh:mm，得到绝对时间戳
+  function tsOf(dayTs, minutes) {
+    const d = new Date(Number(dayTs) || 0);
     d.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
     return d.getTime();
   }
@@ -1960,36 +2035,50 @@ App.records = (function () {
   function openSegTime(g, onSave) {
     if (!g) return;
     const live = g.end == null;
-    const stI = U().el('input', { class: 'input', type: 'time', step: '60' });
-    stI.value = hmLabel(g.start);
-    const enI = U().el('input', { class: 'input', type: 'time', step: '60' });
-    enI.value = live ? '' : hmLabel(g.end);
-    if (live) enI.disabled = true;
-    const dimStyle = { color: 'var(--text-dim)', fontSize: 'calc(var(--font-scale, 1) * 12.5px)', lineHeight: '1.6' };
+    // 两组「日期 + 时间」并排：只改时分的话，23:50 → 次日 00:10 这种跨天永远改不出来。
+    const stDay = U().el('input', { class: 'input', type: 'date' });
+    stDay.value = ymdOf(g.start);
+    const stTime = U().el('input', { class: 'input', type: 'time', step: '60' });
+    stTime.value = hmLabel(g.start);
+    const enDay = U().el('input', { class: 'input', type: 'date' });
+    enDay.value = ymdOf(live ? Date.now() : g.end);
+    const enTime = U().el('input', { class: 'input', type: 'time', step: '60' });
+    enTime.value = live ? '' : hmLabel(g.end);
+    if (live) { enDay.disabled = true; enTime.disabled = true; }
     const err = U().el('div', {
       style: {
         color: 'var(--danger)', fontSize: 'calc(var(--font-scale, 1) * 12.5px)',
         lineHeight: '1.6', minHeight: 'calc(var(--font-scale, 1) * 20px)',
       },
     });
+    // 弹窗里只放两组输入和一个错误位 —— 不放任何说明文字
     const body = U().el('div', {},
-      U().el('div', { class: 'field' }, U().el('label', { text: '开始' }), stI),
-      U().el('div', { class: 'field' }, U().el('label', { text: '结束' }), enI),
-      U().el('div', { style: dimStyle, text: live ? '正在计时：结束时间由计时器收口，先只调整开始。' : '保存后这一段时长与总用时自动重算。' }),
+      U().el('div', { class: 'field' }, U().el('label', { text: '开始' }), U().el('div', { class: 'seg-row' }, stDay, stTime)),
+      U().el('div', { class: 'field' }, U().el('label', { text: '结束' }), U().el('div', { class: 'seg-row' }, enDay, enTime)),
       err);
 
     function submit(close) {
-      const sm = parseHM(stI.value);
+      const sd = parseYMD(stDay.value);
+      if (sd == null) { err.textContent = '开始日期格式不对'; return; }
+      const sm = parseHM(stTime.value);
       if (sm == null) { err.textContent = '开始时间请填 HH:MM'; return; }
-      const em = live ? null : parseHM(enI.value);
-      if (!live && em == null) { err.textContent = '结束时间请填 HH:MM'; return; }
-      const start = tsOnDay(g.start, sm);
-      let end = (em == null) ? null : tsOnDay(g.start, em);
-      if (end != null && end <= start) end += 86400000;      // 跨午夜：结束算第二天（与 segSec 的绝对时间口径一致）
+      let ed = null, em = null;
+      if (!live) {
+        ed = parseYMD(enDay.value);
+        if (ed == null) { err.textContent = '结束日期格式不对'; return; }
+        em = parseHM(enTime.value);
+        if (em == null) { err.textContent = '结束时间请填 HH:MM'; return; }
+      }
+      const start = tsOf(sd, sm);
+      const end = (em == null) ? null : tsOf(ed, em);
+      // 绝不自动 +1 天：日期是用户自己选的，替他猜「第二天」只会把错误藏起来
+      // （以前 end <= start 就加一天，于是「开始==结束」被当成 24 小时，报的却是「超过上限」）。
+      if (end != null && end < start) { err.textContent = '结束时间不能早于开始时间'; return; }
+      if (end != null && end === start) { err.textContent = '结束时间需晚于开始时间'; return; }
       const now = Date.now();
       if (start > now) { err.textContent = '开始时间不能晚于现在'; return; }
       if (end != null && end > now) { err.textContent = '结束时间不能晚于现在'; return; }
-      if (Math.round(((end == null ? now : end) - start) / 1000) > SEG_MAX_SEC) { err.textContent = '单段计时不能超过 8 小时'; return; }
+      if (Math.round(((end == null ? now : end) - start) / 1000) > SEG_MAX_SEC) { err.textContent = '单个计时不能超过 24 小时'; return; }
       close();
       onSave(start, end);
     }
@@ -2002,7 +2091,7 @@ App.records = (function () {
         { label: '保存', primary: true, onClick: (c) => submit(c) },
       ],
     });
-    setTimeout(() => { try { stI.focus(); } catch (_) {} }, 80);
+    setTimeout(() => { try { stDay.focus(); } catch (_) {} }, 80);
   }
 
   // —— 编辑器（含自定义属性动态字段）——
@@ -2033,6 +2122,8 @@ App.records = (function () {
       steps = JSON.parse(JSON.stringify(existingRec.steps));
       normalizeSteps({ steps: steps });
     }
+    // 「删除计时」模式：某条待办的 id。每次打开编辑页都从 null 开始，不带着上一次的状态。
+    let delSegStepId = null;
     // 编辑页里挂到 window / document 上的监听，关页面时统一拆掉（开关多次不累积）
     const teardown = [];
 
@@ -2044,7 +2135,9 @@ App.records = (function () {
     const catWrap = U().el('div', { class: 'row', style: { gap: '8px' } }, catSel, catPlus);
     // textarea 的 value 不能用 setAttribute 设置（对 textarea 无效），必须在创建后赋 .value，否则编辑时文字不回显
     // —— 即时 Markdown 模式下它只承载「当前正在编辑的那一块」，整篇文字在 mdText 里
-    const descI = U().el('textarea', { class: 'textarea', placeholder: '写点什么…' });
+    // 【不要给它 placeholder】它是一块一块搬家的：光标落进任何空行，都会顶着 placeholder 显示
+    // 「写点什么…」，看起来像正文里凭空多了提示词。
+    const descI = U().el('textarea', { class: 'textarea' });
     descI.value = '';
     let descTouched = false;
 
@@ -2121,8 +2214,12 @@ App.records = (function () {
       }
       return -1;
     }
+    let pendingBlock = null;    // 用户正在点另一段：blur 里要立刻把焦点抢回来
     function onDocPress(e) {
       if (edMode !== 'blocks' || !e.target || e.target === descI) return;
+      // 鼠标点按：默认行为会把焦点交给 body（键盘收）。这里直接掐掉，焦点留在正文上。
+      // 触摸不能这么做（会连带把竖向滑动一起废掉），改由 blur 里同步抢焦点。
+      if (e.type === 'mousedown' && e.cancelable !== false) { try { e.preventDefault(); } catch (_) {} }
       const k = blockIndexFrom(e.target);
       if (k < 0 || !docBlocks[k]) return;
       // 空行块点一下就变成「可编辑的空段落」——否则一段被清空之后就再也点不进去了
@@ -2135,7 +2232,14 @@ App.records = (function () {
       const r = el ? el.getBoundingClientRect() : null;
       const y = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
       const where = (r && y != null && y > r.top + r.height / 2) ? 'end' : 'start';
+      pendingBlock = { where: where };
       openBlock(k, where);
+      // 触摸点下去的默认行为仍会把焦点交给 body：这一帧末尾再确认一次，
+      // 两次焦点变化之间没有「无焦点」的空档，键盘就不会收起来再弹一次。
+      setTimeout(() => {
+        if (activeK >= 0 && document.activeElement !== descI) focusCaret(where);
+        pendingBlock = null;
+      }, 0);
     }
     docEl.addEventListener('touchstart', onDocPress, { passive: true });
     docEl.addEventListener('mousedown', onDocPress);
@@ -2144,14 +2248,22 @@ App.records = (function () {
     //  · 焦点落到别处 → 提交并还原成渲染态
     let blurCommitTimer = 0;
     descI.addEventListener('blur', () => {
+      // 点另一段引起的 blur：立刻同步抢回焦点。
+      // 键盘是「事件循环结束后才收」的，在 blur 里同步 focus 回去，用户看不到收起动作；
+      // 旧实现是等 setTimeout 再 focus，中间隔了一帧，就是那次「闪缩闪弹」。
+      if (pendingBlock) {
+        try { descI.focus({ preventScroll: true }); } catch (_) {}
+        return;
+      }
       clearTimeout(blurCommitTimer);
       blurCommitTimer = setTimeout(() => {
         blurCommitTimer = 0;
         if (edMode !== 'blocks' || activeK < 0) return;
         if (document.activeElement === descI) return;
-        if (dock.classList.contains('is-open')) return;      // 排版栏还开着 = 还在编辑
+        if (crossSel) return;                                 // 跨块选区还亮着 = 用户还在选
+        if (dock.classList.contains('is-open')) return;       // 排版栏还开着 = 还在编辑
         commitActive();
-      }, 200);
+      }, 400);
     });
     // 正文高度自适应：文字多少行，输入框就撑多高（整篇文章一眼看全），
     // 外层 .page-sheet-body 自己上下滚动，不再挤在一个小框里滑动。
@@ -2241,11 +2353,49 @@ App.records = (function () {
     // ===== 即时 Markdown：块视图 =====
     // 真源是 mdText（整篇字符串），docBlocks 是它的视图，activeK 是唯一处于源码态的块。
     // 一条铁律：按键路径【绝不重绘】—— 用户正在打的那块本来就是源码，所见即所得。
-    // 只有「换块 / 失焦 / 切视图 / 切模式 / 保存」这五处才重绘，并且都带滚动锚点补偿。
-    function docText() {
+    // 只有「块结构真的变了（回车拆块 / 退格并块 / 跨块替换）」才重建，其余一律原地改。
+    // 块在 mdText 里的起始偏移。块之间用一个 \n 连接，所以第 i 块起点 = 前面所有块长度 + i。
+    // 跨块选区、段首退格并块都靠它，别再自己累加。
+    function rebase() {
+      let off = 0;
+      docBlocks.forEach((b) => { b.srcStart = off; off += b.text.length + 1; });
+    }
+    // 源码与渲染文本的二字对照：给每个块建一张「第 j 个可见字符 → 源码第 i 个字符」表。
+    // 两个指针贪心对齐，源码里多出来的那些字符就是被跳过的记号（# / > / - / ** / [](…) 等）。
+    // 对不齐的块（链接被改写、实体解码等极少数情况）标 exact:false，跨块选区只做整块吸附，绝不猜字符。
+    function buildCharMap(src, dom) {
+      const s = String(src == null ? '' : src);
+      const d = String(dom == null ? '' : dom);
+      if (!d) return { map: [], exact: !s.trim() };
+      const map = new Array(d.length);
+      let i = 0, j = 0;
+      while (j < d.length) {
+        if (i >= s.length) return { map: [], exact: false };
+        if (s.charAt(i) === d.charAt(j)) { map[j] = i; i++; j++; }
+        else i++;
+      }
+      return { map: map, exact: true };
+    }
+    // 画一块：空行块由内部的 .ed-gap 撑高度（与首次 renderDoc 同一条路径），
+    // 其它块走 markdown 渲染并顺手建对照表。
+    // 【别再往块元素自己身上写行内 height】—— 那个值会在「离开空行」时被清掉，
+    // 但节点的 class 还留着编辑态的 md-body，肉眼看到的就是「空行先消失、过一会儿又冒出来」。
+    function paintBlock(el, b) {
+      if (!el) return;
+      el._map = null;
+      el.style.height = '';                       // 高度只由块内内容决定，块自己不吃行内高
+      el.innerHTML = blockHtml(b);
+      if (b.kind === 'blank') return;             // 空行没有可见文字，没有对照表可建
+      el._map = buildCharMap(b.text, el.textContent || '');
+    }
+    // 当前整篇文字（块模式下 textarea 里是最新的一块，mdText 可能是旧的）
+    function currentDoc() {
       if (edMode !== 'blocks') return descI.value;
       if (activeK < 0 || activeK >= docBlocks.length) return mdText;
       return docBlocks.map((b, i) => (i === activeK ? descI.value : b.text)).join('\n');
+    }
+    function docText() {
+      return currentDoc();
     }
     function renderDoc(anchor) {
       const box = descWrap.closest('.ed-scroll');
@@ -2253,18 +2403,18 @@ App.records = (function () {
       const top0 = anchor ? (anchor.top || 0) : 0;
       if (descI.parentNode) descI.parentNode.removeChild(descI);   // 唯一实例先摘出来，重绘要保住它
       U().clear(docEl);
+      rebase();
       docBlocks.forEach((b, i) => {
         const el = U().el('div', {
-          class: 'ed-block' + (b.kind === 'blank' ? ' is-gap' : ' md-body'),
+          class: 'ed-block' + (b.kind === 'blank' ? ' ed-gap' : ' md-body'),
           'data-k': String(i), 'data-kind': b.kind,
         });
-        if (b.kind === 'blank') el.style.height = 'calc(1.78em * ' + Math.max(1, b.text.split('\n').length) + ')';
-        else el.innerHTML = blockHtml(b);
+        paintBlock(el, b);
         docEl.appendChild(el);
       });
-      // 空文档：给一个能点的占位（点它就开始写第一段）
+      // 空文档：留一个能点的空位（点它就开始写第一段）。不放任何提示文字。
       if (!mdText.trim()) {
-        const ph = U().el('div', { class: 'ed-md-empty', text: '写点什么…' });
+        const ph = U().el('div', { class: 'ed-md-empty' });
         ph.addEventListener('click', () => openBlock(0));
         docEl.appendChild(ph);
       }
@@ -2275,34 +2425,75 @@ App.records = (function () {
         box.scrollTop = Math.max(0, st + (el2.offsetTop - top0));
       } else box.scrollTop = st;
     }
-    // where: 'end'（默认）| 'start'
-    function openBlock(k, where) {
+    // 给焦点 + 把光标放到第 pos 个字符（同一个 tick 里做完，中间不隔帧）
+    function focusCaret(where, caret) {
+      try { descI.focus({ preventScroll: true }); } catch (_) { try { descI.focus(); } catch (__) {} }
+      const max = descI.value.length;
+      const pos = (caret != null) ? Math.max(0, Math.min(caret, max)) : (where === 'start' ? 0 : max);
+      try { descI.setSelectionRange(pos, pos); } catch (_) {}
+    }
+    // where: 'end'（默认）| 'start'；caret 给了就以它为准
+    // 【千万别在这里重建整篇】旧实现先 commitActive()（内部 U().clear(docEl) 全量重绘），
+    // descI 被摘出文档 → 焦点丢失（键盘收起）→ 下一帧再 focus()（键盘弹出），
+    // 肉眼看到的就是「点一下别的段落，键盘闪缩闪弹」。现在只做两件事：
+    // 把上一块的内容原地换回去 + 把 descI 搬过来，焦点和光标同步给全。
+    function openBlock(k, where, caret) {
       if (edMode !== 'blocks') return;
+      clearCrossSel();
       if (k < 0) k = 0;
-      if (k >= docBlocks.length) { docBlocks.push({ kind: 'p', text: '' }); k = docBlocks.length - 1; renderDoc(); }
-      if (activeK === k) {
-        setTimeout(() => { try { descI.focus({ preventScroll: true }); } catch (_) {} }, 0);
+      if (k >= docBlocks.length) {
+        // 文档末尾要新开一块：这才是真的结构变化，允许重绘一次
+        docBlocks.push({ kind: 'p', text: '' });
+        mdText = docBlocks.map((b) => b.text).join('\n');
+        rebase();
+        renderDoc();
+        k = docBlocks.length - 1;
+      }
+      const prevK = activeK;
+      if (prevK === k) {
+        focusCaret(where, caret);
+        showDock();
         return;
       }
-      if (activeK >= 0) commitActive();          // 先把上一块写回（内部会重绘一次）
-      if (k >= docBlocks.length) k = docBlocks.length - 1;
+      if (prevK >= 0) {
+        // 上一块写回：只换这一块的 innerHTML，其它块一个节点都不动（节点身份/滚动/图片全保住）
+        const pb = docBlocks[prevK];
+        pb.text = descI.value;
+        // 类型必须跟着重判：空行块点进来时还是 blank，用户在里面打了字之后 text 就不再是空了。
+        // 不重判就会「按 blank 画」= 只撑高度、不渲染文字，刚打的字直接隐身。
+        // 反过来，删空之后也必须回到 blank（splitDoc('') 会特判成一块空 p，这里不能直接用）。
+        if (!pb.text.trim()) pb.kind = 'blank';
+        else {
+          const bits = splitDoc(pb.text);
+          if (bits.length === 1) pb.kind = bits[0].kind;
+        }
+        const pel = docEl.children[prevK];
+        if (pel) { pel.classList.remove('is-editing'); paintBlock(pel, pb); }
+        mdText = docBlocks.map((b) => b.text).join('\n');
+        rebase();
+        descTouched = true;
+      }
       const el = docEl.children[k];
       if (!el) return;
       const ph = docEl.querySelector('.ed-md-empty');
       if (ph) ph.remove();
+      // 空行块点一下就变成可编辑的空段落。
+      // 【别把 kind 改成 p】—— 空行块的身份必须留到离开时（按新文字重判，见上一块写回处），
+      // 中途改掉会让「点一下空行、再点走」把这一行变成 0 高度的空 div（看起来像空行被吞了）。
+      if (docBlocks[k].kind === 'blank') {
+        el.className = 'ed-block md-body';
+        el.style.height = '';
+      }
       activeK = k;
-      descI.value = docBlocks[k].text;
       el.classList.add('is-editing');
-      el.appendChild(descI);                     // 搬家（只换父亲，绝不重建）
+      U().clear(el);                    // 编辑态里这一块只留 textarea
+      descI.value = docBlocks[k].text;
+      el.appendChild(descI);            // 搬家：节点始终在文档里，中间没有脱离 DOM 的一帧
       descI.style.height = '0px';
       growDesc();
-      setTimeout(() => {
-        if (activeK !== k || !descI.isConnected) return;
-        try { descI.focus({ preventScroll: true }); } catch (_) { try { descI.focus(); } catch (__) {} }
-        const pos = where === 'start' ? 0 : descI.value.length;
-        try { descI.setSelectionRange(pos, pos); } catch (_) {}
-        showDock(); paintCountPill();
-      }, 0);
+      focusCaret(where, caret);
+      showDock();
+      paintCountPill();
     }
     function commitActive() {
       if (edMode !== 'blocks' || activeK < 0) return;
@@ -2310,17 +2501,286 @@ App.records = (function () {
       const el = docEl.children[k];
       const box = descWrap.closest('.ed-scroll');
       const anchor = { k: k, top: el ? el.offsetTop : 0, st: box ? box.scrollTop : 0 };
-      const txt = descI.value;
-      const parts = docBlocks.map((b, i) => (i === k ? txt : b.text));
-      mdText = parts.join('\n');
-      docBlocks = splitDoc(mdText);
+      docBlocks[k].text = descI.value;
+      mdText = docBlocks.map((b) => b.text).join('\n');
       descTouched = true;
       activeK = -1;
+      clearCrossSel();
       if (descI.parentNode) descI.parentNode.removeChild(descI);
-      if (el) el.classList.remove('is-editing');
-      renderDoc(anchor);
+      // 离开这一块时重新切块（用户可能刚敲出 "# " 或 "- "）。块结构没变就只重画这一块，
+      // 变了才整篇重绘 —— 整篇重绘发生在「焦点已经离开正文」之后，不会引起键盘抖动。
+      const next = splitDoc(mdText);
+      const same = next.length === docBlocks.length && next.every((b, i) => b.kind === docBlocks[i].kind);
+      docBlocks = next;
+      rebase();
+      if (same && el) { el.classList.remove('is-editing'); paintBlock(el, docBlocks[k]); }
+      else renderDoc(anchor);
       histPushNow();
       scheduleCountPill();
+    }
+    // 一次「改整篇」的动作：重排块 → 重绘 → 把光标放回绝对偏移 caretAbs。
+    // 只在块结构真的变了时走这里（退格并块 / 跨块选区替换）。
+    function applyDocEdit(next, caretAbs) {
+      mdText = next;
+      descTouched = true;
+      activeK = -1;
+      docBlocks = splitDoc(mdText);
+      rebase();
+      renderDoc();
+      let k = 0, off = Math.max(0, caretAbs || 0);
+      for (let i = 0; i < docBlocks.length; i++) {
+        const len = docBlocks[i].text.length;
+        if (off <= len) { k = i; break; }
+        off -= len + 1;
+        k = i + 1;
+      }
+      if (k >= docBlocks.length) { k = docBlocks.length - 1; off = docBlocks[k].text.length; }
+      openBlock(k, 'start', off);
+      histPushNow();
+      scheduleCountPill();
+    }
+    // 段首退格：把这一块并进上一块 —— 就是删掉两块之间那个 \n。
+    // 旧实现这里什么都不做，所以「把一段删空之后再按退格」= 按了没反应（真机最常见的一条）。
+    function joinPrev() {
+      const k = activeK;
+      if (k <= 0) return;
+      const cut = docBlocks[k].srcStart - 1;
+      if (cut < 0) return;
+      const doc = currentDoc();
+      applyDocEdit(doc.slice(0, cut) + doc.slice(cut + 1), cut);
+    }
+    // 段尾 Delete：与下一块合并
+    function joinNext() {
+      const k = activeK;
+      if (k < 0 || k >= docBlocks.length - 1) return;
+      const cut = docBlocks[k].srcStart + descI.value.length;
+      const doc = currentDoc();
+      if (cut >= doc.length) return;
+      applyDocEdit(doc.slice(0, cut) + doc.slice(cut + 1), cut);
+    }
+
+    // ===== 跨块选区 =====
+    // 为什么必须自己算：正在编辑的那一块是 <textarea>（替换元素），选区被它封死，
+    // 手指拖到块边界就出不去 —— 这就是「跨段选不中」。
+    // 做法：textarea 一步都不动（焦点不丢、键盘不闪），手指拖出块外时改成一个「字符区间 crossSel」，
+    // 非编辑块用覆盖层把高亮画出来；之后的退格 / 打字 / 工具栏按钮全部作用在这个区间上。
+    let crossSel = null;                       // { a, b } 相对整篇的字符偏移
+    let drag0 = null;                          // 起手状态
+    const crossLayer = U().el('div', { class: 'ed-cross-layer' });
+    descWrap.appendChild(crossLayer);
+
+    function clearCrossSel() {
+      drag0 = null;
+      if (!crossSel && !crossLayer.childNodes.length) return;
+      crossSel = null;
+      U().clear(crossLayer);
+    }
+    function blockIndexOfNode(node) {
+      let n = node;
+      while (n && n !== docEl) {
+        if (n.getAttribute && n.getAttribute('data-k') != null) return Number(n.getAttribute('data-k'));
+        n = n.parentNode;
+      }
+      return -1;
+    }
+    function localOffset(root, node, offset) {
+      try {
+        const r = document.createRange();
+        r.setStart(root, 0);
+        r.setEnd(node, offset);
+        return r.toString().length;
+      } catch (_) { return 0; }
+    }
+    // DOM 里的一个点 → 整篇的字符偏移（走块的字符对照表）
+    function pointToChar(node, offset) {
+      const k = blockIndexOfNode(node);
+      if (k < 0 || !docBlocks[k]) return null;
+      const el = docEl.children[k];
+      if (!el) return null;
+      const b = docBlocks[k];
+      const local = localOffset(el, node, offset);
+      const domLen = (el.textContent || '').length;
+      const m = el._map;
+      let srcOff;
+      if (m && m.exact && m.map.length) {
+        srcOff = (local >= m.map.length) ? b.text.length : m.map[Math.max(0, local)];
+        if (srcOff == null) srcOff = local;
+      } else {
+        // 对不齐的块只做整块吸附，绝不猜字符
+        srcOff = (local <= 0) ? 0 : (local >= domLen ? b.text.length : 0);
+      }
+      return b.srcStart + srcOff;
+    }
+    function offsetToPoint(root, off) {
+      const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+      let left = Math.max(0, off), n = w.nextNode();
+      while (n) {
+        const len = n.nodeValue ? n.nodeValue.length : 0;
+        if (left <= len) return { node: n, offset: left };
+        left -= len;
+        n = w.nextNode();
+      }
+      return { node: root, offset: root.childNodes.length };
+    }
+    // 整篇的字符偏移 → 块里的 DOM 点
+    function charToPoint(k, charAbs) {
+      const el = docEl.children[k];
+      const b = docBlocks[k];
+      if (!el || !b) return null;
+      const local = Math.max(0, Math.min(b.text.length, charAbs - b.srcStart));
+      const m = el._map;
+      if (m && m.exact && m.map.length) {
+        for (let i = 0; i < m.map.length; i++) if (m.map[i] >= local) return offsetToPoint(el, i);
+        return offsetToPoint(el, m.map.length);
+      }
+      const domLen = (el.textContent || '').length;
+      return offsetToPoint(el, local <= 0 ? 0 : domLen);
+    }
+    function caretAt(x, y) {
+      if (document.caretRangeFromPoint) {
+        const r = document.caretRangeFromPoint(x, y);
+        if (r) return { node: r.startContainer, offset: r.startOffset };
+      }
+      if (document.caretPositionFromPoint) {
+        const p = document.caretPositionFromPoint(x, y);
+        if (p) return { node: p.offsetNode, offset: p.offset };
+      }
+      return null;
+    }
+    function setCrossSel(a, b) {
+      if (!(b > a)) { crossSel = null; U().clear(crossLayer); return; }
+      crossSel = { a: a, b: b };
+      paintCrossSel();
+    }
+    function paintCrossSel() {
+      U().clear(crossLayer);
+      if (!crossSel || edMode !== 'blocks') return;
+      const wr = descWrap.getBoundingClientRect();
+      const A = crossSel.a, B = crossSel.b;
+      docBlocks.forEach((b, k) => {
+        const el = docEl.children[k];
+        if (!el) return;
+        const s0 = b.srcStart, s1 = b.srcStart + b.text.length;
+        if (B <= s0 || A >= s1) return;
+        // 正在编辑的那一块直接用 textarea 自带的选区，视觉上和别处一致
+        if (k === activeK) {
+          try { descI.setSelectionRange(Math.max(0, A - s0), Math.min(b.text.length, B - s0)); } catch (_) {}
+          return;
+        }
+        const p1 = charToPoint(k, Math.max(A, s0));
+        const p2 = charToPoint(k, Math.min(B, s1));
+        if (!p1 || !p2) return;
+        let rects = [];
+        try {
+          const r = document.createRange();
+          r.setStart(p1.node, p1.offset);
+          r.setEnd(p2.node, p2.offset);
+          rects = r.getClientRects();
+        } catch (_) { rects = []; }
+        for (let i = 0; i < rects.length; i++) {
+          const q = rects[i];
+          if (q.width < 1 || q.height < 1) continue;
+          crossLayer.appendChild(U().el('div', {
+            class: 'ed-cross-rect',
+            style: {
+              left: (q.left - wr.left) + 'px', top: (q.top - wr.top) + 'px',
+              width: q.width + 'px', height: q.height + 'px',
+            },
+          }));
+        }
+      });
+    }
+    function ptOf(e) {
+      const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]) || e;
+      if (!t || t.clientX == null) return null;
+      return { x: t.clientX, y: t.clientY };
+    }
+    function offDrag() {
+      document.removeEventListener('touchmove', onDragMove);
+      document.removeEventListener('mousemove', onDragMove);
+      document.removeEventListener('touchend', onDragEnd);
+      document.removeEventListener('touchcancel', onDragEnd);
+      document.removeEventListener('mouseup', onDragEnd);
+    }
+    function onDragStart() {
+      if (edMode !== 'blocks' || activeK < 0) return;
+      drag0 = { out: false, a: 0 };
+      document.addEventListener('touchmove', onDragMove, { passive: false });
+      document.addEventListener('mousemove', onDragMove);
+      document.addEventListener('touchend', onDragEnd);
+      document.addEventListener('touchcancel', onDragEnd);
+      document.addEventListener('mouseup', onDragEnd);
+    }
+    function onDragMove(e) {
+      if (!drag0 || activeK < 0) return;
+      const p = ptOf(e);
+      if (!p) return;
+      const r = descI.getBoundingClientRect();
+      if (!drag0.out) {
+        // 还在本块范围内：交给浏览器自己选（段内选字的原有体验完全不变）
+        if (p.y >= r.top - 10 && p.y <= r.bottom + 10) return;
+        drag0.out = true;
+        // 锚点是「按下那一刻的位置」：浏览器此刻的 textarea 选区起点就是它
+        const s = Math.min(descI.selectionStart || 0, descI.selectionEnd || 0);
+        drag0.a = docBlocks[activeK].srcStart + s;
+      }
+      // 拖选期间别让页面跟着滚（否则越拖越选不到）
+      if (e.cancelable !== false) { try { e.preventDefault(); } catch (_) {} }
+      const hit = caretAt(p.x, p.y);
+      if (!hit) return;
+      const f = pointToChar(hit.node, hit.offset);
+      if (f == null) return;
+      setCrossSel(Math.min(drag0.a, f), Math.max(drag0.a, f));
+      kbTick();
+    }
+    function onDragEnd() {
+      offDrag();
+      if (!drag0) return;
+      drag0 = null;
+      if (crossSel) paintCrossSel();   // 松手后布局已定，重画一遍更准
+    }
+    descI.addEventListener('touchstart', onDragStart, { passive: true });
+    descI.addEventListener('mousedown', onDragStart);
+
+    // 跨块选区被替换成 insert（退格 / 删除 / 打一个字）
+    function replaceCrossSel(insert) {
+      if (!crossSel) return false;
+      const doc = currentDoc();
+      const A = crossSel.a, B = crossSel.b;
+      const ins = insert || '';
+      crossSel = null;
+      U().clear(crossLayer);
+      applyDocEdit(doc.slice(0, A) + ins + doc.slice(B), A + ins.length);
+      return true;
+    }
+    // 跨块选区套记号（粗 / 斜 / 删 / 高亮 / 行内码 / 链接）
+    function wrapCrossSel(pre, suf) {
+      if (!crossSel) return false;
+      const doc = currentDoc();
+      const A = crossSel.a, B = crossSel.b;
+      const next = doc.slice(0, A) + pre + doc.slice(A, B) + suf + doc.slice(B);
+      crossSel = null;
+      U().clear(crossLayer);
+      applyDocEdit(next, B + pre.length + suf.length);
+      return true;
+    }
+    // 跨块选区按行加块前缀（列表 / 引用 / 标题）：先扩到整行，再逐行「剥旧前缀 + 加新前缀」
+    const CROSS_BLK_PREFIX = /^[ \t]{0,3}(?:#{1,6}[ \t]+|[-*+][ \t]+\[[ xX]\][ \t]+|[-*+][ \t]+|\d{1,3}[.)][ \t]+|>[ \t]?)/;
+    function prefixCrossSel(prefix) {
+      if (!crossSel) return false;
+      const doc = currentDoc();
+      const A = crossSel.a, B = crossSel.b;
+      const ls = doc.lastIndexOf('\n', Math.max(0, A - 1)) + 1;
+      let le = doc.indexOf('\n', B);
+      if (le < 0) le = doc.length;
+      const out = doc.slice(ls, le).split('\n')
+        .map((l) => (l.trim() ? prefix + l.replace(CROSS_BLK_PREFIX, '') : l))
+        .join('\n');
+      const next = doc.slice(0, ls) + out + doc.slice(le);
+      crossSel = null;
+      U().clear(crossLayer);
+      applyDocEdit(next, Math.min(next.length, ls + out.length));
+      return true;
     }
     // 把两种模式挂上去（初始与切换都走这里）。容器里永远只有一个孩子：
     // 源码模式是 descI，块模式是 docEl —— 不用 display:none 藏另一套。
@@ -2395,6 +2855,30 @@ App.records = (function () {
     // 安卓上 touchend 早于选区稳定，延一帧再算（否则拿到的是拖动前的位置）
     descI.addEventListener('touchend', function () { setTimeout(scheduleCountPill, 30); }, { passive: true });
 
+    // 退格 / 删除：跨块选区优先，其次是块边界（段首并块、段尾并块）。
+    // 旧实现只接管了回车，段首按退格什么都不发生 —— 这就是「删空一段后退不了格」。
+    descI.addEventListener('keydown', (e) => {
+      if (e.isComposing) return;
+      if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+      if (crossSel) {
+        if (e.cancelable !== false) e.preventDefault();
+        replaceCrossSel('');
+        return;
+      }
+      if (activeK < 0) return;
+      const s = descI.selectionStart, en = descI.selectionEnd;
+      if (s == null || en == null || s !== en) return;   // 段内有选区：交给浏览器自己删
+      if (e.key === 'Backspace' && s === 0) {
+        if (e.cancelable !== false) e.preventDefault();
+        joinPrev();
+        return;
+      }
+      if (e.key === 'Delete' && s === descI.value.length) {
+        if (e.cancelable !== false) e.preventDefault();
+        joinNext();
+      }
+    }, true);
+
     // 【回车空两行·根治（真机实测结论）】
     // 5+ WebView 里实体键盘回车触发的是 beforeinput inputType=insertLineBreak（data=null），不是 insertText，
     // 旧兜底完全没拦；且一次物理回车会被拆成多次 insertLineBreak，导致 value 堆出多个 \n（不是 CSS 行高问题）。
@@ -2413,6 +2897,19 @@ App.records = (function () {
     // 兜底：少数软键盘不发 keydown(Enter)，只发 beforeinput insertLineBreak/insertParagraph。
     // 一律拦掉引擎默认，再由我们插入恰好一个 \n（keydown 刚接管过则跳过，避免双插）。
     descI.addEventListener('beforeinput', (e) => {
+      // 跨块选区还亮着：任何输入都是「替换整段」，先拦掉引擎对本块选区的默认编辑
+      if (crossSel) {
+        if (e.inputType === 'insertText') {
+          if (e.cancelable !== false) e.preventDefault();
+          replaceCrossSel(e.data || '');
+          return;
+        }
+        if (e.inputType === 'insertLineBreak' || e.inputType === 'insertParagraph') {
+          if (e.cancelable !== false) e.preventDefault();
+          replaceCrossSel('\n');
+          return;
+        }
+      }
       if (e.inputType === 'insertLineBreak' || e.inputType === 'insertParagraph') {
         if (e.cancelable !== false) e.preventDefault();
         if (Date.now() - lastEnterKeyDown > 50) insertOneNewline();   // 仅当 keydown 没接管时才补插
@@ -2565,10 +3062,216 @@ App.records = (function () {
       ne = Math.max(ns, Math.min(ne, len));
       applyValue(next, ns, ne);
     }
+    // ===== 六色高亮（透明 40%，字色统一取 --text）=====
+    // 为什么不再用主题强调色：强调色只能表达「这里重要」，多色才能分出
+    // 「重点 / 要改 / 待办 / 结论 / 想法」。也不再给 mark 单独提亮或反转字色 ——
+    // 那会让高亮段的字和正文看起来不是一个颜色，长文里很扎眼。
+    // 蓝是后来补的：绿和紫之间原本空一大段色相，蓝填进去（放紫之前，色相顺序不乱）。
+    // v 是「实色」，只给色点和按钮色条用 —— 面板里如果也用 40% 的底色，
+    // 浅色主题下会被面板自己的底色稀释，黄和橙几乎分不出来，选色就成了猜。
+    const MARK_LIST = [
+      { k: 'yellow', name: '黄', css: 'var(--mark-yellow)', v: '#ffd23f' },
+      { k: 'red', name: '红', css: 'var(--mark-red)', v: '#ff6b6b' },
+      { k: 'orange', name: '橙', css: 'var(--mark-orange)', v: '#ff9f45' },
+      { k: 'green', name: '绿', css: 'var(--mark-green)', v: '#4ade80' },
+      { k: 'blue', name: '蓝', css: 'var(--mark-blue)', v: '#4f8cff' },
+      { k: 'purple', name: '紫', css: 'var(--mark-purple)', v: '#b18cff' },
+    ];
+    const MARK_BY_KEY = {};
+    MARK_LIST.forEach((c) => { MARK_BY_KEY[c.k] = c; });
+    const MARK_NAME_KEY = { '红': 'red', '橙': 'orange', '黄': 'yellow', '绿': 'green', '蓝': 'blue', '紫': 'purple' };
+    // 色名清单只在这里出现一次，下面的正则都由它生成 ——
+    // 加第六种色时，写死字面量的正则漏掉一处，就会出现「==蓝|字== 认不出来、
+    // 再点一次变成 ==紫|蓝|字==」这种双层记号（这次就踩了）。
+    const MARK_NAMES_SRC = Object.keys(MARK_NAME_KEY).join('|');
+    const RE_MARK_SPAN = new RegExp('==(?:(' + MARK_NAMES_SRC + ')[|｜])?([^=\\n]+)==', 'g');
+    const RE_MARK_FULL = new RegExp('^==(?:(' + MARK_NAMES_SRC + ')[|｜])?([\\s\\S]*)==$');
+
+    // 记住上次用的色：放 localStorage 而不是 settings —— 它不属于要备份/同步的数据，
+    // 丢了最坏也就是回到黄色；塞进 settings 反而要为一个颜色多写一次落库。
+    let markColor = 'yellow';
+    try { const s0 = localStorage.getItem('mark.color'); if (s0 && MARK_BY_KEY[s0]) markColor = s0; } catch (_) {}
+
+    // 黄是默认色，不写前缀（历史数据 ==文字== 一个字都不用改）
+    function markPre(key) {
+      return key === 'yellow' ? '==' : '==' + MARK_BY_KEY[key].name + '|';
+    }
+
+    // 找出「包含 [s,e] 的那个高亮段」，连同记号本身一起返回。
+    // 为什么不靠「选区左右各看两眼」：点按钮时选区会先被扩到整行，
+    // 选区已经跑到记号外面去了，左右看空 → 又包一层，变成 ==黄|==红|x====。
+    function markSpanAt(v, s, e) {
+      RE_MARK_SPAN.lastIndex = 0;
+      let m;
+      while ((m = RE_MARK_SPAN.exec(v))) {
+        const a = m.index, b = a + m[0].length;
+        const hdr = m[1] ? 4 : 2;               // '==红|' 4 个字符，'==' 2 个
+        const innerA = a + hdr, innerB = b - 2;
+        if (s >= innerA && e <= innerB) {
+          return { a: a, b: b, innerA: innerA, innerB: innerB, key: m[1] ? MARK_NAME_KEY[m[1]] : 'yellow' };
+        }
+      }
+      return null;
+    }
+
+    // key === 'none' 表示「清除」：只在确实有记号时才动手，没记号就原地不动。
+    function applyMark(key) {
+      const clear = key === 'none';
+
+      // ① 跨块选区：记号可能已经被用户一起拖进选区里了，先看首尾
+      if (crossSel) {
+        const doc = currentDoc();
+        const A = crossSel.a, B = crossSel.b;
+        const inner = doc.slice(A, B);
+        const m = RE_MARK_FULL.exec(inner);
+        const cur = m ? (m[1] ? MARK_NAME_KEY[m[1]] : 'yellow') : '';
+        let out;
+        if (m) {
+          out = (clear || cur === key) ? m[2] : markPre(key) + m[2] + '==';
+        } else {
+          if (clear) return;                       // 本来就没标，清除不该往正文里写东西
+          out = markPre(key) + inner + '==';
+        }
+        crossSel = null;
+        U().clear(crossLayer);
+        applyDocEdit(doc.slice(0, A) + out + doc.slice(B), A + out.length);
+        if (!clear) rememberMark(key);
+        return;
+      }
+
+      // ② 单块 textarea
+      ensureFocusSel();
+      let s = descI.selectionStart, e = descI.selectionEnd;
+      if (s == null || e == null) { s = e = descI.value.length; }
+      if (e < s) { const t = s; s = e; e = t; }
+      const v = descI.value;
+
+      // 光标已经在一段高亮里 → 整段换色 / 取消；不在里面才扩到整行
+      let sp = markSpanAt(v, s, e);
+      if (!sp && s === e) {
+        App.mdToolbar.expandSelectionToLine(descI);
+        s = descI.selectionStart; e = descI.selectionEnd;
+        if (s == null || e == null) { s = e = v.length; }
+        if (e < s) { const t = s; s = e; e = t; }
+        sp = markSpanAt(v, s, e);
+      }
+
+      if (sp) {
+        const txt = v.slice(sp.innerA, sp.innerB);
+        let next, ns, ne;
+        if (clear || sp.key === key) {
+          // 同色再点一次 / 点清除 → 连记号一起脱掉
+          next = v.slice(0, sp.a) + txt + v.slice(sp.b);
+          ns = sp.a; ne = sp.a + txt.length;
+        } else {
+          // 换色：只替换左侧前缀，右侧 == 不动
+          const pre = markPre(key);
+          next = v.slice(0, sp.a) + pre + txt + '==' + v.slice(sp.b);
+          ns = sp.a + pre.length; ne = ns + txt.length;
+        }
+        applyValue(next, ns, ne);
+        if (!clear) rememberMark(key);
+        return;
+      }
+
+      if (s === e) return;                         // 空行：没什么可标
+      if (clear) return;                           // 没标过，清除不动
+      const pre = markPre(key);
+      const next = v.slice(0, s) + pre + v.slice(s, e) + '==' + v.slice(e);
+      applyValue(next, s + pre.length, e + pre.length);
+      rememberMark(key);
+    }
+
+    let markBtn = null;
+    function paintMarkBtn() {
+      if (!markBtn) return;
+      markBtn.style.setProperty('--mark-current', MARK_BY_KEY[markColor].v);
+    }
+    function rememberMark(key) {
+      if (!MARK_BY_KEY[key]) return;
+      markColor = key;
+      try { localStorage.setItem('mark.color', key); } catch (_) {}
+      paintMarkBtn();
+      paintMarkPanel();
+    }
+
+    // 面板：六个色点 + 清除。规格见 css 的 .mark-panel（挂在 .ed-dock 上，不能被工具条裁掉）
+    const markPanel = U().el('div', { class: 'mark-panel hidden' });
+    let markOpen = false;
+    const markDots = [];
+    function paintMarkPanel() {
+      markDots.forEach((d) => d.classList.toggle('is-cur', d.getAttribute('data-k') === markColor));
+    }
+    function closeMarkPanel() {
+      if (!markOpen) return;
+      markOpen = false;
+      markPanel.classList.add('hidden');
+      if (markBtn) markBtn.classList.remove('on');
+      try { document.removeEventListener('pointerdown', onMarkDoc, true); } catch (_) {}
+      try { document.removeEventListener('touchstart', onMarkDoc, true); } catch (_) {}
+    }
+    function onMarkDoc(e) {
+      const t = e.target;
+      if (t && (t === markBtn || (markBtn && markBtn.contains && markBtn.contains(t)))) return;
+      if (t && (t === markPanel || (markPanel.contains && markPanel.contains(t)))) return;
+      closeMarkPanel();
+    }
+    function openMarkPanel() {
+      if (markOpen) { closeMarkPanel(); return; }
+      if (!markBtn) return;
+      markOpen = true;
+      paintMarkPanel();
+      markPanel.classList.remove('hidden');
+      // 位置按按钮算，再收进 dock 的可视范围 —— 高亮按钮可能被滚到屏幕边上
+      const dr = dock.getBoundingClientRect();
+      const br = markBtn.getBoundingClientRect();
+      const pw = markPanel.offsetWidth || 224;
+      let left = br.left - dr.left + br.width / 2 - pw / 2;
+      left = Math.max(8, Math.min(left, dr.width - pw - 8));
+      markPanel.style.left = Math.round(left) + 'px';
+      markBtn.classList.add('on');
+      try { document.addEventListener('pointerdown', onMarkDoc, true); } catch (_) {}
+      try { document.addEventListener('touchstart', onMarkDoc, true); } catch (_) {}
+    }
+
+    MARK_LIST.forEach((c) => {
+      const dot = U().el('button', { class: 'mark-dot', type: 'button', title: c.name });
+      dot.style.background = c.v;
+      dot.setAttribute('data-k', c.k);
+      dot.setAttribute('aria-label', c.name + '色高亮');
+      bindTool(dot, () => { closeMarkPanel(); applyMark(c.k); });
+      markDots.push(dot);
+      markPanel.appendChild(dot);
+    });
+    markPanel.appendChild(U().el('span', { class: 'mark-sep' }));
+    const markClearBtn = U().el('button', { class: 'mark-clear', type: 'button', title: '清除高亮' });
+    markClearBtn.setAttribute('aria-label', '清除高亮');
+    bindTool(markClearBtn, () => { closeMarkPanel(); applyMark('none'); });
+    markPanel.appendChild(markClearBtn);
+    dock.appendChild(markPanel);
+
+    // 其余记号（粗 / 斜 / 删 / 行内码 / 链接 / 列表 / 引用）交给 md-toolbar 算；
+    // 高亮不再走这里 —— 它有六种颜色和「换色 / 取消」两态，单独由 applyMark 处理。
     function runMd(key) {
+      // 跨块选区优先：记号直接套在整个区间上（textarea 里只有一个块，切不了跨块的事）
+      if (crossSel) {
+        if (key === 'bold') return wrapCrossSel('**', '**');
+        if (key === 'italic') return wrapCrossSel('*', '*');
+        if (key === 'strike') return wrapCrossSel('~~', '~~');
+        if (key === 'code') return wrapCrossSel('`', '`');
+        if (key === 'link') return wrapCrossSel('[', '](url)');
+        if (key === 'unordered') return prefixCrossSel('- ');
+        if (key === 'ordered') return prefixCrossSel('1. ');
+        if (key === 'task') return prefixCrossSel('- [ ] ');
+        if (key === 'quote') return prefixCrossSel('> ');
+      }
       const styles = (App.mdToolbar && App.mdToolbar.STYLES) ? App.mdToolbar.STYLES : null;
       if (!styles || !styles[key]) return;
       ensureFocusSel();
+      // 没有选中任何文字时，动作作用于「光标所在的整行」。
+      // 必须显式扩到整行：光标停在行尾时右侧没有字符可扩，交给 md-toolbar 的词扩
+      // 只会得到空选区（以前就会变成在行尾插一段「**粗体**」占位词）。
+      if (descI.selectionStart === descI.selectionEnd) App.mdToolbar.expandSelectionToLine(descI);
       let res = null;
       try { res = App.mdToolbar.compute(descI, styles[key]); } catch (_) { res = null; }
       commitMd(res);
@@ -2581,12 +3284,13 @@ App.records = (function () {
     const RE_HEAD_LV = /^[ \t]{0,3}(#{1,6})[ \t]+/;
     const RE_BLOCK_PREFIX = /^[ \t]{0,3}(?:#{1,6}[ \t]+|[-*+][ \t]+\[[ xX]\][ \t]+|[-*+][ \t]+|\d{1,3}[.)][ \t]+|>[ \t]?)/;
     function runHeading(level) {
+      const prefix = new Array(level + 1).join('#') + ' ';
+      if (crossSel) return prefixCrossSel(prefix);
       ensureFocusSel();
       const origStart = descI.selectionStart, origEnd = descI.selectionEnd;
       App.mdToolbar.expandSelectionToLine(descI);
       const start = descI.selectionStart, end = descI.selectionEnd;
       const lines = descI.value.slice(start, end).split('\n');
-      const prefix = new Array(level + 1).join('#') + ' ';
       const lvOf = (l) => { const m = RE_HEAD_LV.exec(l); return m ? m[1].length : 0; };
       const strip = (l) => l.replace(RE_BLOCK_PREFIX, '');
       const real = lines.filter((l) => l.trim());
@@ -2714,9 +3418,20 @@ App.records = (function () {
     MD_TOOLS.forEach((t) => {
       // 行内 6 个与块级 4 个之间再隔一条线，扫一眼就能分组
       if (t.k === 'unordered') dockTools.appendChild(U().el('span', { class: 'ed-tool-sep' }));
-      const b = U().el('button', { class: 'ed-tool', type: 'button', title: t.t, html: U().icon(t.icon, 16) });
+      const isMark = t.k === 'mark';
+      const b = U().el('button', {
+        class: 'ed-tool' + (isMark ? ' mark-btn' : ''), type: 'button', title: t.t,
+        html: U().icon(t.icon, 16),
+      });
       b.setAttribute('aria-label', t.t);
-      bindTool(b, () => runMd(t.k));
+      if (isMark) {
+        // 高亮不是「点一下就完」，而是先选色：点按钮只负责开面板
+        markBtn = b;
+        paintMarkBtn();
+        bindTool(b, openMarkPanel);
+      } else {
+        bindTool(b, () => runMd(t.k));
+      }
       dockTools.appendChild(b);
     });
     // 模式切换：即时 Markdown ⇄ 源码（逃生门）。两个入口同一个函数：
@@ -3384,7 +4099,7 @@ App.records = (function () {
     function bindNum(el, fn) { numBinders.push({ el: el, fn: fn }); return el; }
     function paintNums() {
       for (let i = 0; i < numBinders.length; i++) {
-        try { numBinders[i].el.textContent = U().fmtHMS(numBinders[i].fn()); } catch (_) {}
+        try { numBinders[i].el.textContent = U().fmtClock(numBinders[i].fn()); } catch (_) {}
       }
     }
 
@@ -3445,11 +4160,11 @@ App.records = (function () {
       stepsSumEl.textContent = U().fmtDuration(Math.round(stepsTotalSec() / 60)) || '0 分';
       stepsDoneEl.textContent = '完成 ' + steps.filter((s) => s.done).length + '/' + steps.length;
     }
-    function buildSegRow(g) {
+    function buildSegRow(s, g) {
       const live = g.end == null;
       const row = U().el('div', { class: 'seg-row' + (live ? ' is-live' : '') });
       // 时刻是按钮：点一下就能改这一段的开始 / 结束（原来是只读文本）。
-      // 正在走的那一段显示的是「已用时长」（bindNum 每秒刷），点它同样能改开始时间。
+      // 一行显示「09:12–09:30」；正在走的那一段这一格就是实时读数（bindNum 每秒刷）。
       const time = U().el('button', { class: 'seg-time', type: 'button', title: '修改起止时间' });
       if (live) { bindNum(time, () => segSec(g)); time.classList.add('is-clock'); }
       else time.textContent = hhmm(g.start) + '–' + hhmm(g.end);
@@ -3462,12 +4177,16 @@ App.records = (function () {
       });
       const noteBtn = U().el('button', { class: 'seg-note', type: 'button', text: g.note || '加备注' });
       noteBtn.addEventListener('click', () => editSegNote(g));
-      const del = U().el('button', { class: 'icon-btn seg-del', type: 'button', html: U().icon('x', 13), title: '删除这一段' });
-      del.addEventListener('click', () => delSeg(g));
-      row.appendChild(time); row.appendChild(noteBtn);
-      // 已结束的段在备注后面补一个耗时（时:分:秒）；正在走的那段左边就是耗时，不重复
-      if (!live) row.appendChild(U().el('span', { class: 'seg-dur', text: U().fmtHMS(segSec(g)) }));
-      row.appendChild(del);
+      row.appendChild(time);
+      row.appendChild(noteBtn);
+      // 已结束的段在备注右侧补耗时（分:秒，超一小时自动带小时）；正在走的那段左边就是读数，不重复
+      if (!live) row.appendChild(U().el('span', { class: 'seg-dur', text: U().fmtClock(segSec(g)) }));
+      // × 平时不建：只有「待办操作 → 删除计时」里才出现，行宽才真的收窄
+      if (delSegStepId === s.id) {
+        const del = U().el('button', { class: 'icon-btn seg-del', type: 'button', html: U().icon('x', 13), title: '删除这一段' });
+        del.addEventListener('click', () => delSeg(g));
+        row.appendChild(del);
+      }
       return row;
     }
 
@@ -3485,13 +4204,23 @@ App.records = (function () {
       const name = U().el('button', { class: 'step-name', type: 'button', text: s.text || '未命名待办' });
       name.addEventListener('click', () => editStepText(s));
       const dur = bindNum(U().el('span', { class: 'step-dur' }), () => stepSec(s));
+      const delMode = delSegStepId === s.id;
       const more = U().el('button', { class: 'icon-btn step-more', type: 'button', html: U().icon('more', 18), title: '待办操作' });
       more.addEventListener('click', () => openStepMenu(s));
-      row.appendChild(U().el('div', { class: 'step-top' }, chk, name, dur, more));
+      if (delMode) more.classList.add('is-del');       // 删除模式：⋯ 染成强调色
+      const top = U().el('div', { class: 'step-top' }, chk, name, dur);
+      // 删除模式下右侧常驻一个「完成」：点它收回所有 × 按钮
+      if (delMode) {
+        const done = U().el('button', { class: 'seg-done', type: 'button', text: '完成' });
+        done.addEventListener('click', () => { delSegStepId = null; renderSteps(); syncTabs(); });
+        top.appendChild(done);
+      }
+      top.appendChild(more);
+      row.appendChild(top);
 
       if (s.segs && s.segs.length) {
         const wrap = U().el('div', { class: 'step-segs' });
-        s.segs.forEach((g) => wrap.appendChild(buildSegRow(g)));
+        s.segs.forEach((g) => wrap.appendChild(buildSegRow(s, g)));
         row.appendChild(wrap);
       }
       const btn = U().el('button', { class: 'step-timer' + (isRun ? ' is-run' : ''), type: 'button' },
@@ -3568,6 +4297,12 @@ App.records = (function () {
         steps.splice(i + 1, 0, one);
         renderSteps(); commitSteps();
       });
+      // 删除计时：平时分段行不留 ×（太挤），进这个模式才逐段显示
+      const delMode = delSegStepId === s.id;
+      row(delMode ? '完成删除' : '删除计时', !((s.segs || []).length), () => {
+        delSegStepId = delMode ? null : s.id;
+        renderSteps(); syncTabs();
+      });
       row('删除这条待办', false, () => {
         U().confirmDialog('删除「' + (s.text || '未命名待办') + '」及其全部计时记录？', { okLabel: '删除', danger: true }).then(async (ok) => {
           if (!ok) return;
@@ -3579,12 +4314,14 @@ App.records = (function () {
       });
     }
     function delSeg(g) {
-      U().confirmDialog('删除这一段计时（' + U().fmtHMS(segSec(g)) + '）？', { okLabel: '删除', danger: true }).then(async (ok) => {
+      U().confirmDialog('删除这一段计时（' + U().fmtClock(segSec(g)) + '）？', { okLabel: '删除', danger: true }).then(async (ok) => {
         if (!ok) return;
         const st = App.timer ? App.timer.state() : { running: false };
         if (st.running && st.segId === g.id) await App.timer.stop();
         const step = steps.find((s) => (s.segs || []).indexOf(g) > -1);
         if (step) step.segs = step.segs.filter((x) => x.id !== g.id);
+        // 这段是这条待办的最后一段：× 已经无处可点了，顺手退出删除模式
+        if (step && !step.segs.length && delSegStepId === step.id) delSegStepId = null;
         renderSteps(); syncTabs(); await commitSteps();
       });
     }

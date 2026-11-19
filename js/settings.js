@@ -16,11 +16,11 @@ App.settings = (function () {
   // ===== 关于页配置 =====
   // 兜底版本号：只有拿不到运行时版本时才用它（原生打包后优先读 plus.runtime.version，
   // 也就是 manifest.json 里配置的 versionName，改了包名/版本号这里不需要跟着改）。
-  const APP_VERSION = '2.0.0';
+  const APP_VERSION = '1.0.0';
   // 检查更新要请求的 GitHub 仓库，格式 '用户名/仓库名'。
   // 例如仓库是 https://github.com/zhangsan/gojo 就填 'zhangsan/gojo'。
   // 留空则点「检查更新」会提示未配置（不会报错、不会白屏）。
-  const UPDATE_REPO = '';
+  const UPDATE_REPO = 'erhuChenChen/GoJo-test';
   // 使用说明：直接平铺展示的文字，整段替换成你自己的内容即可。
   // 这里的内容会按 Markdown 渲染（## 是二级标题、- 是列表项、**文字** 是加粗），
   // 写普通换行也可以，会原样换行显示。
@@ -1020,6 +1020,7 @@ App.settings = (function () {
         { key: 'income', label: '收入' },
         { key: 'expense', label: '支出' },
         { key: 'tags', label: '标签' },
+        { key: 'steps', label: '待办' },
         { key: 'category', label: '分类' },
       ].concat((domain.customFields || []).map((f) => ({ key: f.id, label: f.name })));
       opts.forEach((o) => {
@@ -1043,7 +1044,7 @@ App.settings = (function () {
     content.appendChild(U().el('div', { style: { height: '14px' } }));
     content.appendChild(saveBtn);
     content.appendChild(U().el('div', { class: 'section-title', style: { marginTop: '20px' }, text: '列表卡片附加字段' }));
-    content.appendChild(U().el('div', { class: 'muted', style: { fontSize: '0.75rem', marginBottom: '10px' }, text: '记录名称与日期固定显示；下面勾选需要额外展示的字段，默认全部不勾选。' }));
+    content.appendChild(U().el('div', { class: 'muted', style: { fontSize: '0.75rem', marginBottom: '10px' }, text: '记录名称与日期固定显示。标签、待办默认展示，点一下即可关掉；「待办」只显示完成进度与前两条待办文字，不含计时与耗时。' }));
     content.appendChild(cardFieldsBox);
   }
 
